@@ -23,7 +23,7 @@
 
 ## 你醒来后要做的
 
-1. **域名**：给我子域名 + 把 A 记录指到 34.208.44.222，我跑 `scripts/issue-cert.sh <域名>` 即可（5 分钟）。
+1. ~~域名~~ 已完成：https://demo.haoyufang.dev/（Cloudflare DNS only → Let's Encrypt，自动续期）。
 2. **AWS Free Plan 风险（重要）**：你的账户是新版 Free account plan。Lightsail 8 GB 每月 $44 会持续消耗 credits；credits 用完或 6 个月到期时 **AWS 会关闭账户**（保留 90 天）。建议在 credits 剩约 $50 前主动升级到 Paid plan（升级本身不收费，Always Free 与剩余 credits 保留），否则 demo 链接会在面试中间失效。在 Billing → Free Tier / Credits 页能看到余额。
 3. **AWS 托管服务**（我没碰）：DynamoDB（务必 `BillingMode: PROVISIONED`）、Lambda、CloudFormation/SAM、Databricks Free Edition。你开好账号/权限后告诉我，我接：`shipment.eta-updated` → 存储前台可用性投影到 DynamoDB（Lambda + SAM 模板），dbt 加 databricks target。
 4. **GitHub**：新建公开仓库（建议名 `inbound-atp`），把本地 main 推上去；在仓库 Secrets 里加 `DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_SSH_KEY`（用一把新生成的部署专用 key，把公钥追加到服务器 `~/.ssh/authorized_keys`），`deploy` 工作流就能自动发布。
