@@ -13,9 +13,11 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.Objects;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,14 +31,35 @@ public class EtaRecalculationService {
     private final EventPublisher publisher;
     private final AppProperties props;
     private final Clock clock;
+    private final JdbcClient jdbc;
 
     public EtaRecalculationService(ShipmentRepository shipments, LaneStatsRepository laneStats,
-                                   EventPublisher publisher, AppProperties props, Clock clock) {
+                                   EventPublisher publisher, AppProperties props, Clock clock, JdbcClient jdbc) {
         this.shipments = shipments;
         this.laneStats = laneStats;
         this.publisher = publisher;
         this.props = props;
         this.clock = clock;
+        this.jdbc = jdbc;
+    }
+
+    public record RecalcSummary(int shipments, int changed) {}
+
+    /** Re-scores every open, not-yet-received shipment; used after a lane-statistics refresh and after seeding. */
+    public RecalcSummary recalculateAllOpen() {
+        List<Long> ids = jdbc.sql("""
+                select s.id from shipment s join purchase_order po on po.id = s.po_id
+                where po.status = 'OPEN' and s.current_stage <> :received order by s.id
+                """)
+                .param("received", MilestoneType.RECEIVED_FC.name())
+                .query(Long.class)
+                .list();
+        int changed = 0;
+        for (long id : ids) {
+            LocalDate before = shipments.require(id).predictedArrival();
+            if (!Objects.equals(before, recalculate(id).arrival())) changed++;
+        }
+        return new RecalcSummary(ids.size(), changed);
     }
 
     /**
