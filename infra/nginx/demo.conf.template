@@ -1,5 +1,5 @@
 # Rendered by scripts/render-nginx.sh into /etc/nginx/sites-available/demo.
-# __TLS_BLOCK__ is replaced with the 443 server when a Let's Encrypt cert exists for __DOMAIN__.
+# The trailing placeholder becomes the 443 server block when a Let's Encrypt cert exists for the domain.
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
