@@ -1,0 +1,42 @@
+name: deploy
+
+# Manual, or automatically after a green ci run on main. Needs repository secrets:
+#   DEPLOY_HOST (34.208.44.222), DEPLOY_USER (ubuntu), DEPLOY_SSH_KEY (private key, PEM)
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+concurrency: { group: deploy, cancel-in-progress: false }
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: build web
+        run: cd web && npm ci && npm run build
+      - name: ssh key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+      - name: sync sources and web build
+        run: |
+          rsync -az --delete --exclude .git --exclude api/target --exclude web/node_modules --exclude .venv \
+            --exclude 'infra/.env' -e "ssh -i ~/.ssh/deploy" ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/${{ secrets.DEPLOY_USER }}/inbound-atp/"
+          rsync -az --delete --exclude '.well-known' -e "ssh -i ~/.ssh/deploy" web/dist/ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/var/www/demo/"
+      - name: build + roll out api, refresh dbt models, re-score
+        run: |
+          ssh -i ~/.ssh/deploy "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s <<'REMOTE'
+            set -euo pipefail
+            cd ~/inbound-atp && ./scripts/deploy-api.sh
+            cd data && export DBT_PG_HOST=127.0.0.1 DBT_PG_PASSWORD=$(grep POSTGRES_PASSWORD ../infra/.env | cut -d= -f2)
+            ~/dbt-venv/bin/dbt build --profiles-dir .
+            curl -fsS -X POST http://127.0.0.1:8080/api/eta/recalculate-all
+          REMOTE

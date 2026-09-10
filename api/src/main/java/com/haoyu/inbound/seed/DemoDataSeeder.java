@@ -119,7 +119,7 @@ class DemoDataSeeder implements CommandLineRunner {
 
         int poSeq = 1000;
         // a year of history: fully received containers with all five milestones
-        for (int i = 0; i < 240; i++) {
+        for (int i = 0; i < 480; i++) {   // ~40 per lane, enough for HIGH confidence on late stages
             Lane lane = LANES.get(rnd.nextInt(LANES.size()));
             LocalDate departed = today.minusDays(20 + rnd.nextInt(345));
             insertPurchaseOrder(conn, rnd, lane, "PO-" + (poSeq++), departed, skuIds, fcIds, true, today);
@@ -208,7 +208,8 @@ class DemoDataSeeder implements CommandLineRunner {
         int toReceived = toCustoms + 2 + rnd.nextInt(5);
 
         LocalDate booked = departed.minusDays(bookedLead);
-        LocalDate plannedArrival = departed.plusDays((int) Math.round(lane.medianDays() * 0.78) + 1 + 2 + 2);
+        // carriers quote a conservative plan; only containers that are genuinely slow (port delays, bad weeks) end up late vs plan
+        LocalDate plannedArrival = departed.plusDays((int) Math.round(lane.medianDays() * 0.78) + 11);
         String supplier = PORT_SUPPLIER.get(lane.origin());
 
         long poId;

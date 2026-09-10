@@ -1,0 +1,13 @@
+# Used with `dbt run --profiles-dir .`; every value comes from the environment so nothing secret lives here.
+inbound:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PG_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_PG_USER', 'inbound') }}"
+      password: "{{ env_var('DBT_PG_PASSWORD', 'inbound') }}"
+      dbname: "{{ env_var('DBT_PG_DB', 'inbound') }}"
+      schema: analytics
+      threads: 2

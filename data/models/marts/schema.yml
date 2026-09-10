@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: lane_lead_time_stats
+    description: >
+      Historical transit-time percentiles per lane (origin port → fulfillment center) and starting stage.
+      Materialized into analytics.lane_lead_time_stats, the contract table the API reads.
+    columns:
+      - name: origin_port
+        tests: [not_null]
+      - name: dest_fc_code
+        tests: [not_null]
+      - name: from_stage
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['BOOKED', 'DEPARTED_ORIGIN', 'ARRIVED_DEST_PORT', 'CUSTOMS_CLEARED']
+      - name: p50_days
+        tests: [not_null]
+      - name: p80_days
+        tests: [not_null]
+      - name: sample_n
+        tests: [not_null]
