@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: inbound-atp-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/inbound}
+    username: ${DB_USER:inbound}
+    password: ${DB_PASSWORD:inbound}
+    hikari:
+      maximum-pool-size: 8
+  flyway:
+    schemas: public,analytics
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    consumer:
+      group-id: eta-recalc
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+  jackson:
+    default-property-inclusion: non_null
+
+app:
+  topics:
+    milestones: shipment.milestones
+    eta-updated: shipment.eta-updated
+  seed:
+    enabled: ${SEED_ENABLED:true}
+  atp:
+    horizon-days: 120
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
