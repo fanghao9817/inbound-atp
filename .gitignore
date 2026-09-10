@@ -1,0 +1,23 @@
+# java
+api/target/
+*.class
+*.log
+# node
+web/node_modules/
+web/dist/
+web/.vite/
+# python / dbt
+.venv/
+__pycache__/
+data/target/
+data/dbt_packages/
+data/logs/
+# env & secrets
+.env
+*.pem
+infra/certs/
+# editors
+.idea/
+.vscode/
+*.iml
+.DS_Store
