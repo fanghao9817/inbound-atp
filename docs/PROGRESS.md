@@ -9,7 +9,7 @@ Deploy target: Lightsail 34.208.44.222 (ubuntu, key in 申请/Article申请/). C
 4. [x] Web: Vue 3 + TS dashboard (availability, inbound POs, exceptions, lanes), nginx serves + proxies /api
 5. [x] HTTPS on demo.haoyufang.dev (Cloudflare DNS-only A record; Let's Encrypt via scripts/issue-cert.sh)
 6. [x] dbt: lane lead-time stats (p50/p80) from historical milestones → API reads (48 lanes/stages, 12 checks pass)
-7. [x] GitHub Actions: ci.yml (mvn verify, web build+lint, dbt build), deploy.yml (rsync + roll-out) — unrun until the repo is on GitHub
+7. [x] GitHub Actions: ci.yml (mvn verify, web build+lint, dbt build), deploy.yml (rsync + roll-out) — ci #1 and deploy #1 green on github.com/fanghao9817/inbound-atp
 8. [x] README + docs/HANDOFF.md
 
 ## Log
@@ -21,3 +21,4 @@ Deploy target: Lightsail 34.208.44.222 (ubuntu, key in 申请/Article申请/). C
   `org.testcontainers.postgresql` / `org.testcontainers.kafka`.
 - 2026-09-10 ~02:30 PT: web, dbt, HTTPS, CI files done; see docs/HANDOFF.md. Loop stopped at the agreed scope (no AWS managed services).
 - 2026-09-10 12:20 PT: domain live at https://demo.haoyufang.dev/. SSH hang was the client side (campus guest Wi-Fi blocking port 22), not the server; fail2ban (sshd jail) was installed along the way and kept.
+- 2026-09-10 ~13:00 PT: repo pushed to GitHub; first CI (3 jobs) and first automatic deploy both green.
