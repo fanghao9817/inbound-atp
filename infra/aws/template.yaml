@@ -70,6 +70,7 @@ Resources:
         Cors:
           AllowOrigins: ['https://demo.haoyufang.dev', 'http://localhost:5173']
           AllowMethods: [GET]
+          AllowHeaders: [content-type]
           MaxAge: 300
 
   AvailabilityApiLogGroup:

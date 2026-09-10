@@ -11,7 +11,9 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
+  // only bodies need a content type; a header on GET turns a simple cross-origin request into a preflighted one
+  const headers = init?.body ? { 'Content-Type': 'application/json' } : undefined
+  const res = await fetch(path, { ...init, headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) } })
   if (!res.ok) {
     let detail = res.statusText
     try { detail = (await res.json()).detail ?? detail } catch { /* not a problem+json body */ }
