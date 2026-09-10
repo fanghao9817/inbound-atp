@@ -23,3 +23,4 @@ Deploy target: Lightsail 34.208.44.222 (ubuntu, key in 申请/Article申请/). C
 - 2026-09-10 12:20 PT: domain live at https://demo.haoyufang.dev/. SSH hang was the client side (campus guest Wi-Fi blocking port 22), not the server; fail2ban (sshd jail) was installed along the way and kept.
 - 2026-09-10 ~13:00 PT: repo pushed to GitHub; first CI (3 jobs) and first automatic deploy both green.
 - 2026-09-10 ~13:30 PT: AWS side live — SAM stack (DynamoDB + 2 Lambdas), OIDC deploy role, API projects availability on eta-updated (verified 2 s end-to-end), web storefront panel, dbt on Databricks Free Edition (16/16). Deployer key kept only until the OIDC deploy is proven in CI.
+- 2026-09-10 ~14:10 PT: deploy #3 green end-to-end — SAM stack via GitHub OIDC (subject format `repo:owner@id/repo@id`), box roll-out, dbt on Postgres + Databricks, re-score + re-project. Every JD item now has a live, tested implementation.

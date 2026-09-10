@@ -28,7 +28,7 @@
 3. ~~AWS 托管服务~~ 已完成（2026-09-10 下午）：
    - 两个 CloudFormation 栈（us-west-2）：`inbound-atp-bootstrap`（制品桶、GitHub OIDC provider、受限部署角色 `inbound-atp-github-deploy`）和 `inbound-atp`（SAM：DynamoDB `inbound-atp-availability` provisioned 5/5、Lambda `inbound-atp-projector` 与 `inbound-atp-availability-api` + Function URL、7 天日志、只能调用投影 Lambda 的 IAM 用户 `inbound-atp-box`）。
    - 服务器 `infra/.env` 里有 box 用户的密钥与 Function URL；`~/.aws/credentials` 里 `deployer`（你的管理员密钥）和 `box` 两个 profile。
-   - **建议现在删掉 `inbound-atp-deployer` 的访问密钥**（IAM → Users → inbound-atp-deployer → Security credentials → 删除）：CI 已改走 OIDC，不再需要长期密钥；将来只有改 bootstrap 栈时才需要临时再建一把。
+   - GitHub Actions 通过 OIDC 部署已在 `deploy #3` 验证成功（GitHub 的 subject 格式是 `repo:owner@id/repo@id:...`，信任策略已按此钉死 ID）。**`inbound-atp-deployer` 的访问密钥已无用途，建议删除**；将来只有改 bootstrap 栈时才临时再建一把。
    - Databricks：`~/.config/inbound-atp/databricks.env`（token 90 天，2026-12-09 前后过期，到时在 Databricks 重新生成并更新该文件）。同一套 dbt 模型在 Databricks 上跑通，结果表 `workspace.analytics.lane_lead_time_stats`。
 4. ~~GitHub~~ 已完成：https://github.com/fanghao9817/inbound-atp ，`ci #1` 三个 job 全绿，`deploy #1` 自动发布成功；部署专用密钥在本地 `~/.ssh/inbound-atp-deploy`（公钥已在服务器）。
 5. **浏览器里点一遍**四个页面；我只从命令行验证了路由和资源，没有跑真实浏览器。Inbound 页选一个集装箱、Post 一个里程碑，能看到预测在半秒内通过 Kafka 更新。
