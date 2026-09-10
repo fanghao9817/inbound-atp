@@ -16,8 +16,11 @@ if [ "$DEMO_DOMAIN" != "_" ] && sudo test -f "$CERT"; then
     server_name ${DEMO_DOMAIN};
     ssl_certificate     /etc/letsencrypt/live/${DEMO_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DEMO_DOMAIN}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:demo:5m;
+    ssl_session_tickets off;
     add_header Strict-Transport-Security \"max-age=31536000\" always;
 ${BODY}
 }"
