@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON the server. Renders the nginx site: HTTP only, or HTTP→HTTPS redirect + TLS when a cert exists.
-# DEMO_DOMAIN comes from infra/.env (e.g. 34.208.44.222.sslip.io, later the real domain).
+# DEMO_DOMAIN comes from infra/.env (e.g. demo.haoyufang.dev, later the real domain).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEMO_DOMAIN="${DEMO_DOMAIN:-$(grep -E '^DEMO_DOMAIN=' infra/.env 2>/dev/null | cut -d= -f2- || true)}"

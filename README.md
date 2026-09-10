@@ -3,7 +3,7 @@
 **Available-to-promise (ATP) with inbound arrival prediction** for a retailer that ships bulky goods from Asian
 suppliers into several North-American fulfillment centers.
 
-Live demo: https://34.208.44.222.sslip.io/ · API: `https://34.208.44.222.sslip.io/api/...` · health: `/health`
+Live demo: https://demo.haoyufang.dev/ · API: `https://demo.haoyufang.dev/api/...` · health: `/health`
 
 The question it answers is the one every storefront and every planner asks: *"If a customer wants 5 of this
 sofa in Calgary, when can we honestly promise it?"* — counting stock on hand, the containers that are still on

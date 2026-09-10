@@ -2,8 +2,8 @@
 
 ## 现在线上有什么
 
-- **https://34.208.44.222.sslip.io/** — Vue 前端（Availability / Inbound / Exceptions / Lanes 四页），HTTP 自动跳 HTTPS，Let's Encrypt 证书（到期 2026-12-09，certbot 定时续期已配）。
-- **https://34.208.44.222.sslip.io/api/...** — Spring Boot 4.1 API（容器内运行，nginx 反代），`/health` 为健康检查。
+- **https://demo.haoyufang.dev/** — Vue 前端（Availability / Inbound / Exceptions / Lanes 四页），HTTP 自动跳 HTTPS，Let's Encrypt 证书（到期 2026-12-09，certbot 定时续期已配）。
+- **https://demo.haoyufang.dev/api/...** — Spring Boot 4.1 API（容器内运行，nginx 反代），`/health` 为健康检查。
 - 服务器上 docker compose 跑着 `inbound-postgres`、`inbound-kafka`（KRaft 单节点）、`inbound-api`；总内存占用约 1.2 GB / 7.6 GB。
 - dbt 已在服务器上跑过一次（`~/dbt-venv`），`analytics.lane_lead_time_stats` 有 48 条航线统计，每条 31–51 个样本。
 
