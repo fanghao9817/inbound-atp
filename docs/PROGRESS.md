@@ -20,4 +20,4 @@ Deploy target: Lightsail 34.208.44.222 (ubuntu, key in 申请/Article申请/). C
   factory for Kafka is missing; Jackson 3 lives in `tools.jackson`; Testcontainers 2.x classes are in
   `org.testcontainers.postgresql` / `org.testcontainers.kafka`.
 - 2026-09-10 ~02:30 PT: web, dbt, HTTPS, CI files done; see docs/HANDOFF.md. Loop stopped at the agreed scope (no AWS managed services).
-- 2026-09-10 12:20 PT: domain live at https://demo.haoyufang.dev/. SSH outage root cause: internet SSH scanners filling sshd's unauthenticated slots; fail2ban (sshd jail, 4 tries/10m → 1h ban) installed.
+- 2026-09-10 12:20 PT: domain live at https://demo.haoyufang.dev/. SSH hang was the client side (campus guest Wi-Fi blocking port 22), not the server; fail2ban (sshd jail) was installed along the way and kept.
