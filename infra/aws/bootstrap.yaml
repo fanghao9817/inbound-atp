@@ -9,7 +9,13 @@ Parameters:
   GitHubRepo:
     Type: String
     Default: fanghao9817/inbound-atp
-    Description: owner/name allowed to assume the deploy role
+    Description: owner/name allowed to assume the deploy role (legacy subject format)
+  GitHubRepoWithIds:
+    Type: String
+    Default: fanghao9817@33857459/inbound-atp@1364807253
+    Description: >-
+      owner@ownerId/repo@repoId - the subject format GitHub's OIDC tokens now use. Pinning the numeric
+      ids means a renamed or re-created repository cannot assume the role by reusing the name.
   AppStackName:
     Type: String
     Default: inbound-atp
@@ -60,7 +66,9 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:*
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubRepoWithIds}:*
+                  - !Sub repo:${GitHubRepo}:*
       Policies:
         - PolicyName: deploy-app-stack
           PolicyDocument:

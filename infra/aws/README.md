@@ -15,3 +15,7 @@ AWS_PROFILE_NAME=deployer scripts/deploy-aws.sh             # package + deploy t
 Data model (single table): `pk = SKU#<code>`, `sk = FC#<code>`, attributes `availableNow`, `promiseDate`,
 `promisable`, `confidence`, `nextArrival`, `updatedAt`, `source`. Writes are conditional on `updatedAt`
 so a stale projection never overwrites a newer one.
+
+**OIDC gotcha (2026):** GitHub's token subject is `repo:owner@ownerId/repo@repoId:ref:...`, not `repo:owner/repo:...`.
+A trust policy written for the old format is rejected with `Not authorized to perform sts:AssumeRoleWithWebIdentity`;
+CloudTrail's `userIdentity.principalId` on the failed call shows the real subject. `bootstrap.yaml` pins the ids.
