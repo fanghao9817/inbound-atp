@@ -10,9 +10,8 @@ CERT="/etc/letsencrypt/live/${DEMO_DOMAIN}/fullchain.pem"
 if [ "$DEMO_DOMAIN" != "_" ] && sudo test -f "$CERT"; then
   HTTP_BODY="    location / { return 301 https://\$host\$request_uri; }"
   TLS_BLOCK="server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${DEMO_DOMAIN};
     ssl_certificate     /etc/letsencrypt/live/${DEMO_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DEMO_DOMAIN}/privkey.pem;
