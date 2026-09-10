@@ -64,6 +64,11 @@ services:
       KAFKA_BOOTSTRAP: kafka:9092
       SEED_ENABLED: "true"
       TZ: America/Vancouver
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      PROJECTOR_FUNCTION: ${PROJECTOR_FUNCTION:-}
+      AVAILABILITY_URL: ${AVAILABILITY_URL:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

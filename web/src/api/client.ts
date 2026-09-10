@@ -1,6 +1,7 @@
 import type {
+  AppConfig,
   AtpQuote, FcSummary, FulfillmentCenter, FulfillmentRequest, FulfillmentResponse, LaneStats, LateShipment,
-  MilestoneResponse, PurchaseOrderView, RecalcSummary, ShipmentView, Sku, Stage,
+  MilestoneResponse, PurchaseOrderView, RecalcSummary, ShipmentView, Sku, Stage, StorefrontAvailability,
 } from './types'
 
 export class ApiError extends Error {
@@ -36,4 +37,9 @@ export const api = {
   exceptions: () => request<LateShipment[]>('/api/exceptions'),
   laneStats: () => request<LaneStats[]>('/api/lanes/stats'),
   recalculateAll: () => request<RecalcSummary>('/api/eta/recalculate-all', { method: 'POST', body: '{}' }),
+  config: () => request<AppConfig>('/api/config'),
+  projectAll: () => request<{ items: number }>('/api/availability/project-all', { method: 'POST', body: '{}' }),
+  /** Straight to the Lambda Function URL — the storefront never touches the operational database. */
+  storefront: (baseUrl: string, sku: string) =>
+    request<StorefrontAvailability>(`${baseUrl.replace(/\/$/, '')}/?${q({ sku })}`),
 }

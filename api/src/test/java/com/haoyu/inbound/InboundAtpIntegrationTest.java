@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
+import com.haoyu.inbound.projection.AvailabilityItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -29,7 +30,7 @@ import tools.jackson.databind.ObjectMapper;
  * statistics change the prediction and its confidence.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "app.seed.enabled=true")
-@Import(TestcontainersConfig.class)
+@Import({TestcontainersConfig.class, TestProjectionConfig.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class InboundAtpIntegrationTest {
 
@@ -41,6 +42,9 @@ class InboundAtpIntegrationTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    TestProjectionConfig.RecordingSink sink;
 
     RestClient http;
 
@@ -64,6 +68,14 @@ class InboundAtpIntegrationTest {
         assertThat(get("/api/fulfillment-centers")).hasSize(4);
         assertThat(get("/api/purchase-orders?status=OPEN").size()).isBetween(30, 36);
         assertThat(get("/actuator/health").get("status").asString()).isEqualTo("UP");
+        // the seeder projects every SKU x FC once the data is in
+        assertThat(sink.batches).anySatisfy(b -> {
+            assertThat(b.getKey()).isEqualTo("full-refresh");
+            assertThat(b.getValue()).hasSize(12 * 4);
+        });
+        JsonNode config = get("/api/config");
+        assertThat(config.get("projectionEnabled").asBoolean()).isFalse();
+        assertThat(post("/api/availability/project-all", Map.of()).get("items").asInt()).isEqualTo(48);
     }
 
     @Test
@@ -111,6 +123,16 @@ class InboundAtpIntegrationTest {
             assertThat(s.get("predictedConfidence").asString()).isEqualTo("LOW");   // no lane history yet
             assertThat(s.get("predictionBasis").asString()).contains("No lane history");
         });
+
+        // the second consumer of shipment.eta-updated re-projects the SKUs on that container at its destination FC
+        String destFc = get("/api/shipments/" + shipmentId).get("lane").get("destFcCode").asString();
+        int batchesBefore = sink.batches.size();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                assertThat(sink.batches).anySatisfy(b -> {
+                    assertThat(b.getKey()).isEqualTo("eta-updated");
+                    assertThat(b.getValue()).isNotEmpty().allSatisfy(i -> assertThat(i.fc()).isEqualTo(destFc));
+                    assertThat(b.getValue()).extracting(AvailabilityItem::source).containsOnly("eta-updated");
+                }));
 
         assertThat(post("/api/shipments/" + shipmentId + "/milestones", body).get("accepted").asBoolean()).isFalse();
         assertThat(get("/api/shipments/" + shipmentId).get("milestones")).hasSize(milestonesBefore + 1);

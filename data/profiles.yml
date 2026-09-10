@@ -11,3 +11,12 @@ inbound:
       dbname: "{{ env_var('DBT_PG_DB', 'inbound') }}"
       schema: analytics
       threads: 2
+    # Same models on Databricks Free Edition (serverless SQL warehouse); sources come from seeds there.
+    databricks:
+      type: databricks
+      host: "{{ env_var('DBT_DATABRICKS_HOST', '') }}"
+      http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH', '') }}"
+      token: "{{ env_var('DBT_DATABRICKS_TOKEN', '') }}"
+      catalog: workspace
+      schema: analytics
+      threads: 2

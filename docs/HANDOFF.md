@@ -24,8 +24,12 @@
 ## 你醒来后要做的
 
 1. ~~域名~~ 已完成：https://demo.haoyufang.dev/（Cloudflare DNS only → Let's Encrypt，自动续期）。
-2. **AWS Free Plan 风险（重要）**：你的账户是新版 Free account plan。Lightsail 8 GB 每月 $44 会持续消耗 credits；credits 用完或 6 个月到期时 **AWS 会关闭账户**（保留 90 天）。建议在 credits 剩约 $50 前主动升级到 Paid plan（升级本身不收费，Always Free 与剩余 credits 保留），否则 demo 链接会在面试中间失效。在 Billing → Free Tier / Credits 页能看到余额。
-3. **AWS 托管服务**（我没碰）：DynamoDB（务必 `BillingMode: PROVISIONED`）、Lambda、CloudFormation/SAM、Databricks Free Edition。你开好账号/权限后告诉我，我接：`shipment.eta-updated` → 存储前台可用性投影到 DynamoDB（Lambda + SAM 模板），dbt 加 databricks target。
+2. **AWS Free Plan 风险（重要）**：账户是新版 Free account plan，2026-09-10 余额 $100。Lightsail 8 GB 每月 $44 → **约 11 月初用完**，届时 AWS 会关闭账户（保留 90 天）。**10 月中之前**升级到 Paid plan（不收费，Always Free 与余额保留）。DynamoDB/Lambda/CloudFormation 这部分在 Always Free 内，不消耗 credits；已设 $5 月度预算告警。
+3. ~~AWS 托管服务~~ 已完成（2026-09-10 下午）：
+   - 两个 CloudFormation 栈（us-west-2）：`inbound-atp-bootstrap`（制品桶、GitHub OIDC provider、受限部署角色 `inbound-atp-github-deploy`）和 `inbound-atp`（SAM：DynamoDB `inbound-atp-availability` provisioned 5/5、Lambda `inbound-atp-projector` 与 `inbound-atp-availability-api` + Function URL、7 天日志、只能调用投影 Lambda 的 IAM 用户 `inbound-atp-box`）。
+   - 服务器 `infra/.env` 里有 box 用户的密钥与 Function URL；`~/.aws/credentials` 里 `deployer`（你的管理员密钥）和 `box` 两个 profile。
+   - **建议现在删掉 `inbound-atp-deployer` 的访问密钥**（IAM → Users → inbound-atp-deployer → Security credentials → 删除）：CI 已改走 OIDC，不再需要长期密钥；将来只有改 bootstrap 栈时才需要临时再建一把。
+   - Databricks：`~/.config/inbound-atp/databricks.env`（token 90 天，2026-12-09 前后过期，到时在 Databricks 重新生成并更新该文件）。同一套 dbt 模型在 Databricks 上跑通，结果表 `workspace.analytics.lane_lead_time_stats`。
 4. ~~GitHub~~ 已完成：https://github.com/fanghao9817/inbound-atp ，`ci #1` 三个 job 全绿，`deploy #1` 自动发布成功；部署专用密钥在本地 `~/.ssh/inbound-atp-deploy`（公钥已在服务器）。
 5. **浏览器里点一遍**四个页面；我只从命令行验证了路由和资源，没有跑真实浏览器。Inbound 页选一个集装箱、Post 一个里程碑，能看到预测在半秒内通过 Kafka 更新。
 

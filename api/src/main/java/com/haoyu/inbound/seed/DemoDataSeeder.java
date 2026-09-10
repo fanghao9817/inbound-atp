@@ -2,6 +2,7 @@ package com.haoyu.inbound.seed;
 
 import com.haoyu.inbound.common.AppProperties;
 import com.haoyu.inbound.eta.EtaRecalculationService;
+import com.haoyu.inbound.projection.AvailabilityProjectionService;
 import com.haoyu.inbound.procurement.MilestoneType;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -75,12 +76,15 @@ class DemoDataSeeder implements CommandLineRunner {
     private final AppProperties props;
     private final Clock clock;
     private final EtaRecalculationService recalculation;
+    private final AvailabilityProjectionService projection;
 
-    DemoDataSeeder(DataSource dataSource, AppProperties props, Clock clock, EtaRecalculationService recalculation) {
+    DemoDataSeeder(DataSource dataSource, AppProperties props, Clock clock, EtaRecalculationService recalculation,
+                   AvailabilityProjectionService projection) {
         this.dataSource = dataSource;
         this.props = props;
         this.clock = clock;
         this.recalculation = recalculation;
+        this.projection = projection;
     }
 
     @Override
@@ -106,6 +110,8 @@ class DemoDataSeeder implements CommandLineRunner {
         }
         var scored = recalculation.recalculateAllOpen();
         log.info("initial ETA scoring: {} open shipments, {} predictions set", scored.shipments(), scored.changed());
+        var projected = projection.projectAll();
+        log.info("initial storefront projection: {} rows", projected.items());
     }
 
     private void seed(Connection conn) throws SQLException {

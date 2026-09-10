@@ -31,6 +31,10 @@ app:
     enabled: ${SEED_ENABLED:true}
   atp:
     horizon-days: 120
+  aws:
+    region: ${AWS_REGION:us-west-2}
+    projector-function: ${PROJECTOR_FUNCTION:}      # empty = projection disabled (local dev, tests)
+    availability-url: ${AVAILABILITY_URL:}
 
 server:
   port: 8080

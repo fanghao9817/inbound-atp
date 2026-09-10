@@ -1,0 +1,5 @@
+id,code,name,region,receiving_buffer_days
+1,FC-RIC,"Richmond, BC",CA-WEST,2
+2,FC-CAL,"Calgary, AB",CA-WEST,2
+3,FC-JAX,"Jacksonville, FL",US-EAST,3
+4,FC-PAT,"Patterson, CA",US-WEST,3

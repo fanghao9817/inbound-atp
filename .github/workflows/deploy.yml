@@ -1,7 +1,8 @@
 name: deploy
 
-# Manual, or automatically after a green ci run on main. Needs repository secrets:
-#   DEPLOY_HOST (34.208.44.222), DEPLOY_USER (ubuntu), DEPLOY_SSH_KEY (private key, PEM)
+# Manual, or automatically after a green ci run on main.
+# Box: DEPLOY_HOST (34.208.44.222), DEPLOY_USER (ubuntu), DEPLOY_SSH_KEY repository secrets.
+# AWS: no keys — GitHub's OIDC token assumes the role created by infra/aws/bootstrap.yaml.
 on:
   workflow_dispatch:
   workflow_run:
@@ -11,9 +12,38 @@ on:
 
 concurrency: { group: deploy, cancel-in-progress: false }
 
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  AWS_DEPLOY_ROLE: arn:aws:iam::266901698218:role/inbound-atp-github-deploy
+
 jobs:
-  deploy:
+  aws:
+    name: aws · deploy SAM stack via OIDC
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      availability_url: ${{ steps.outputs.outputs.availability_url }}
+      projector_function: ${{ steps.outputs.outputs.projector_function }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: ./scripts/deploy-aws.sh
+      - id: outputs
+        run: |
+          get() { aws cloudformation describe-stacks --stack-name inbound-atp --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+          echo "availability_url=$(get AvailabilityUrl)" >> "$GITHUB_OUTPUT"
+          echo "projector_function=$(get ProjectorFunctionName)" >> "$GITHUB_OUTPUT"
+
+  box:
+    name: box · web + api + dbt (postgres, databricks)
+    needs: aws
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,12 +61,27 @@ jobs:
           rsync -az --delete --exclude .git --exclude api/target --exclude web/node_modules --exclude .venv \
             --exclude 'infra/.env' -e "ssh -i ~/.ssh/deploy" ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/${{ secrets.DEPLOY_USER }}/inbound-atp/"
           rsync -az --delete --exclude '.well-known' -e "ssh -i ~/.ssh/deploy" web/dist/ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/var/www/demo/"
-      - name: build + roll out api, refresh dbt models, re-score
+      - name: roll out api, refresh dbt models on both warehouses, re-score + re-project
+        env:
+          AVAILABILITY_URL: ${{ needs.aws.outputs.availability_url }}
+          PROJECTOR_FUNCTION: ${{ needs.aws.outputs.projector_function }}
         run: |
-          ssh -i ~/.ssh/deploy "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s <<'REMOTE'
+          ssh -i ~/.ssh/deploy "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            AVAILABILITY_URL="$AVAILABILITY_URL" PROJECTOR_FUNCTION="$PROJECTOR_FUNCTION" bash -s <<'REMOTE'
             set -euo pipefail
-            cd ~/inbound-atp && ./scripts/deploy-api.sh
-            cd data && export DBT_PG_HOST=127.0.0.1 DBT_PG_PASSWORD=$(grep POSTGRES_PASSWORD ../infra/.env | cut -d= -f2)
+            cd ~/inbound-atp
+            # keep the box's runtime config in step with the stack outputs
+            for k in AVAILABILITY_URL PROJECTOR_FUNCTION; do
+              v="${!k}"; [ -z "$v" ] && continue
+              grep -q "^$k=" infra/.env && sed -i "s|^$k=.*|$k=$v|" infra/.env || echo "$k=$v" >> infra/.env
+            done
+            ./scripts/deploy-api.sh
+            cd data
+            export DBT_PG_HOST=127.0.0.1 DBT_PG_PASSWORD=$(grep POSTGRES_PASSWORD ../infra/.env | cut -d= -f2)
             ~/dbt-venv/bin/dbt build --profiles-dir .
+            if [ -f ~/.config/inbound-atp/databricks.env ]; then
+              set -a; . ~/.config/inbound-atp/databricks.env; set +a
+              ~/dbt-venv/bin/dbt build --profiles-dir . --target databricks
+            fi
             curl -fsS -X POST http://127.0.0.1:8080/api/eta/recalculate-all
           REMOTE

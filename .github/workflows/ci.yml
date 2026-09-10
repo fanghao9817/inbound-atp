@@ -54,3 +54,15 @@ jobs:
       - run: psql postgresql://inbound:inbound@localhost:5432/inbound -v ON_ERROR_STOP=1 -f ../api/src/main/resources/db/migration/V1__schema.sql
       - run: dbt build --profiles-dir .
         env: { DBT_PG_HOST: localhost, DBT_PG_PASSWORD: inbound }
+
+  aws:
+    name: aws · cfn-lint templates + compile lambdas
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infra/aws } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install cfn-lint
+      - run: cfn-lint bootstrap.yaml template.yaml
+      - run: python -m py_compile functions/projector/app.py functions/availability/app.py

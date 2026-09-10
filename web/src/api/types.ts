@@ -44,3 +44,11 @@ export interface LateShipment {
 }
 export interface LaneStats { originPort: string; destFcCode: string; fromStage: Stage; toStage: Stage; p50Days: number; p80Days: number; sampleN: number }
 export interface RecalcSummary { shipments: number; changed: number }
+
+export interface AppConfig { availabilityUrl: string; projectionEnabled: boolean }
+/** Row served by the storefront Lambda (DynamoDB projection). */
+export interface StorefrontRow {
+  sku: string; fc: string; fcName?: string; availableNow: number; promiseDate?: string; promisable: boolean
+  confidence?: Confidence; nextArrival?: string; updatedAt: string; source: string
+}
+export interface StorefrontAvailability { sku: string; updatedAt: string; byFc: StorefrontRow[] }

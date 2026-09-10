@@ -16,3 +16,18 @@ models:
       +materialized: view
     marts:
       +materialized: table
+
+# Seeds are a snapshot of the operational tables (exported from PostgreSQL) so the Databricks target,
+# which has no connection to the operational database, can run the same models. Disabled on Postgres,
+# where the models read the live tables through sources.
+seeds:
+  inbound_analytics:
+    +enabled: "{{ target.type == 'databricks' }}"
+    src_fulfillment_center:
+      +column_types: { id: bigint, receiving_buffer_days: int }
+    src_purchase_order:
+      +column_types: { id: bigint, dest_fc_id: bigint, planned_arrival: date, created_at: timestamp }
+    src_shipment:
+      +column_types: { id: bigint, po_id: bigint, planned_departure: date, planned_arrival: date, predicted_arrival: date, version: int, updated_at: timestamp }
+    src_shipment_milestone:
+      +column_types: { id: bigint, shipment_id: bigint, occurred_at: timestamp, recorded_at: timestamp }

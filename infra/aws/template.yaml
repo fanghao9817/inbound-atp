@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  inbound-atp storefront availability projection. The ATP service on the box pushes SKU x FC
+  availability into DynamoDB through a Lambda whenever a predicted arrival changes; a second Lambda
+  behind a Function URL serves that projection to storefront clients without touching the
+  operational database. Everything sits inside the always-free tiers (provisioned 5/5 DynamoDB,
+  well under 1M Lambda requests, 7-day log retention).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 10
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref AvailabilityTable
+
+Resources:
+  AvailabilityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: inbound-atp-availability
+      BillingMode: PROVISIONED                      # the free 25 RCU/WCU only apply to provisioned capacity
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableClass: STANDARD
+      AttributeDefinitions:
+        - AttributeName: pk                          # SKU#<code>
+          AttributeType: S
+        - AttributeName: sk                          # FC#<code>
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  ProjectorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: inbound-atp-projector
+      Description: Upserts SKU x FC availability items pushed by the ATP service (invoked with the AWS SDK, async)
+      CodeUri: functions/projector/
+      Handler: app.handler
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref AvailabilityTable
+
+  ProjectorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ProjectorFunction}
+      RetentionInDays: 7
+
+  AvailabilityApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: inbound-atp-availability-api
+      Description: Read-only storefront endpoint - GET ?sku=CODE[&fc=CODE] over the DynamoDB projection
+      CodeUri: functions/availability/
+      Handler: app.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AvailabilityTable
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: ['https://demo.haoyufang.dev', 'http://localhost:5173']
+          AllowMethods: [GET]
+          MaxAge: 300
+
+  AvailabilityApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AvailabilityApiFunction}
+      RetentionInDays: 7
+
+  # Lightsail instances have no instance profile, so the box authenticates with an access key for
+  # this user. The key is created out of band (never in stack outputs) and can only invoke the projector.
+  BoxUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: inbound-atp-box
+      Policies:
+        - PolicyName: invoke-projector-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ProjectorFunction.Arn
+
+Outputs:
+  TableName:
+    Value: !Ref AvailabilityTable
+  ProjectorFunctionName:
+    Value: !Ref ProjectorFunction
+  AvailabilityUrl:
+    Value: !GetAtt AvailabilityApiFunctionUrl.FunctionUrl
+  BoxUserName:
+    Value: !Ref BoxUser

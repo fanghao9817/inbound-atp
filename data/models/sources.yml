@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: inbound
-    description: Operational tables owned by the API (Flyway). Read-only from dbt.
+    description: Operational tables owned by the API (Flyway). Read-only from dbt; on Databricks the src() macro swaps these for seeds.
     database: "{{ env_var('DBT_PG_DB', 'inbound') }}"
     schema: public
     tables:

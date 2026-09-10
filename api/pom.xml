@@ -18,7 +18,20 @@
 
   <properties>
     <java.version>21</java.version>
+    <awssdk.version>2.54.15</awssdk.version>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${awssdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <dependencies>
     <!-- SQL-first data access: JdbcClient/JdbcTemplate on top of plain JDBC, no ORM -->
@@ -54,6 +67,11 @@
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <!-- storefront projection: invoke the projector Lambda (see infra/aws) -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>lambda</artifactId>
     </dependency>
 
     <dependency>

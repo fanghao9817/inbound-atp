@@ -11,7 +11,7 @@ select
     m.dest_fc_code,
     m.stage                                                        as from_stage,
     'RECEIVED_FC'                                                  as to_stage,
-    extract(epoch from (r.received_at - m.occurred_at)) / 86400.0  as days
+    {{ days_between('r.received_at', 'm.occurred_at') }}          as days
 from {{ ref('stg_milestones') }} m
 join received r on r.shipment_id = m.shipment_id
 where m.stage <> 'RECEIVED_FC'

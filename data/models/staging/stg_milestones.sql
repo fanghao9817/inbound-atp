@@ -7,7 +7,7 @@ select
     m.type                        as stage,
     m.occurred_at,
     m.source
-from {{ source('inbound', 'shipment_milestone') }} m
-join {{ source('inbound', 'shipment') }} s        on s.id = m.shipment_id
-join {{ source('inbound', 'purchase_order') }} po on po.id = s.po_id
-join {{ source('inbound', 'fulfillment_center') }} fc on fc.id = po.dest_fc_id
+from {{ src('shipment_milestone') }} m
+join {{ src('shipment') }} s        on s.id = m.shipment_id
+join {{ src('purchase_order') }} po on po.id = s.po_id
+join {{ src('fulfillment_center') }} fc on fc.id = po.dest_fc_id

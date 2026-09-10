@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  One-time bootstrap for inbound-atp: the artifact bucket CloudFormation packages into, the GitHub
+  OIDC identity provider, and a deploy role scoped to this project's stack and resource names.
+  Deployed once with an administrator; afterwards GitHub Actions deploys the app stack without any
+  long-lived AWS keys.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: fanghao9817/inbound-atp
+    Description: owner/name allowed to assume the deploy role
+  AppStackName:
+    Type: String
+    Default: inbound-atp
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub inbound-atp-artifacts-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-artifacts
+            Status: Enabled
+            ExpirationInDays: 30
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: inbound-atp-github-deploy
+      Description: Assumed by GitHub Actions (OIDC) to deploy the inbound-atp app stack
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:*
+      Policies:
+        - PolicyName: deploy-app-stack
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: StackOperations
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AppStackName}/*
+              - Sid: SamTransform
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: arn:aws:cloudformation:*:aws:transform/Serverless-2016-10-31
+              - Sid: ListStacks
+                Effect: Allow
+                Action: cloudformation:ListStacks
+                Resource: '*'
+              - Sid: Artifacts
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+              - Sid: AppResourcesByNamePrefix
+                Effect: Allow
+                Action: ['lambda:*', 'dynamodb:*', 'logs:*']
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:inbound-atp-*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/inbound-atp-*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/inbound-atp-*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/inbound-atp-*:*
+              - Sid: LogGroupDiscovery
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: '*'
+              - Sid: IamForAppRolesAndUsers
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:GetUser
+                  - iam:PutUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:GetUserPolicy
+                  - iam:TagUser
+                  - iam:ListAccessKeys
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/inbound-atp-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:user/inbound-atp-*
+
+Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  GitHubDeployRoleArn:
+    Value: !GetAtt GitHubDeployRole.Arn

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '@/api/client'
-import type { AtpQuote, FcSummary, FulfillmentResponse } from '@/api/types'
+import type { AppConfig, AtpQuote, FcSummary, FulfillmentResponse, StorefrontAvailability } from '@/api/types'
 import { useCatalogStore } from '@/stores/catalog'
 import ConfidencePill from '@/components/ConfidencePill.vue'
 import StagePill from '@/components/StagePill.vue'
@@ -16,6 +16,33 @@ const quote = ref<AtpQuote | null>(null)
 const fulfillment = ref<FulfillmentResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+
+const config = ref<AppConfig | null>(null)
+const storefront = ref<StorefrontAvailability | null>(null)
+const storefrontError = ref<string | null>(null)
+const projecting = ref(false)
+
+async function loadStorefront() {
+  if (!config.value?.availabilityUrl) return
+  storefrontError.value = null
+  try {
+    storefront.value = await api.storefront(config.value.availabilityUrl, sku.value)
+  } catch (e) {
+    storefront.value = null
+    storefrontError.value = e instanceof ApiError ? e.detail : String(e)
+  }
+}
+
+async function projectAll() {
+  projecting.value = true
+  try {
+    await api.projectAll()
+    await new Promise((r) => setTimeout(r, 1500)) // the Lambda is invoked asynchronously
+    await loadStorefront()
+  } finally {
+    projecting.value = false
+  }
+}
 
 const skuName = computed(() => catalog.skus.find((s) => s.code === sku.value)?.name ?? '')
 
@@ -50,9 +77,11 @@ function select(fc: string) {
 
 onMounted(async () => {
   await catalog.load()
-  await load()
+  config.value = await api.config().catch(() => null)
+  await Promise.all([load(), loadStorefront()])
 })
 watch([sku, qty], () => load())
+watch(sku, () => loadStorefront())
 </script>
 
 <template>
@@ -165,6 +194,36 @@ watch([sku, qty], () => load())
         <tbody>
           <tr v-for="a in fulfillment.purchaseOrderAllocations" :key="a.purchaseOrderId">
             <td>{{ a.poNumber }}</td><td class="num">{{ a.allocatedQuantity }}</td><td>{{ a.expectedAt }}</td><td><ConfidencePill :value="a.confidence" /></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" v-if="config?.availabilityUrl" style="margin-top: 16px">
+    <h2>Storefront projection (DynamoDB via Lambda)</h2>
+    <p class="note" style="margin: 0 0 10px">
+      What a storefront would read: a DynamoDB copy of this SKU's availability, refreshed by a Lambda whenever a
+      container's predicted arrival changes (<code>shipment.eta-updated</code> → SDK invoke → conditional put on
+      <code>updatedAt</code>). This panel calls the Lambda Function URL directly — the operational database is never on that path.
+    </p>
+    <div class="controls" style="margin-bottom: 8px">
+      <button @click="loadStorefront">Re-read</button>
+      <button @click="projectAll" :disabled="projecting">{{ projecting ? 'Projecting…' : 'Re-project all SKUs' }}</button>
+      <span v-if="storefront" class="muted">last write {{ storefront.updatedAt.slice(0, 19).replace('T', ' ') }}</span>
+      <span v-if="storefrontError" class="error">{{ storefrontError }}</span>
+    </div>
+    <div class="table-wrap" v-if="storefront">
+      <table>
+        <thead><tr><th>FC</th><th class="num">Available now</th><th>Promise (qty 1)</th><th>Next arrival</th><th>Conf.</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr v-for="r in storefront.byFc" :key="r.fc">
+            <td><b>{{ r.fc }}</b> <span class="muted">{{ r.fcName }}</span></td>
+            <td class="num">{{ r.availableNow }}</td>
+            <td>{{ r.promisable ? r.promiseDate : '—' }}</td>
+            <td>{{ r.nextArrival ?? '—' }}</td>
+            <td><ConfidencePill :value="r.confidence" /></td>
+            <td class="muted">{{ r.source }}</td>
           </tr>
         </tbody>
       </table>
