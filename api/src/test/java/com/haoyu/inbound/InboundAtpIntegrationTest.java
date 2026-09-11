@@ -87,6 +87,16 @@ class InboundAtpIntegrationTest {
             JsonNode quote = post("/api/fulfillment/quote", Map.of("sku", "SOFA-3S-OAT", "fc", fcCode, "requestedQuantity", 1));
             int available = atp.get("availableNow").asInt();
             assertThat(quote.get("allocatedFromInventory").asInt()).isEqualTo(Math.min(available, 1));
+            // both read paths must date the same inbound PO the same way (arrival + dock-to-stock)
+            JsonNode big = post("/api/fulfillment/quote", Map.of("sku", "SOFA-3S-OAT", "fc", fcCode, "requestedQuantity", 100_000));
+            for (JsonNode alloc : big.get("purchaseOrderAllocations")) {
+                String po = alloc.get("poNumber").asString();
+                for (JsonNode supply : atp.get("supplies")) {
+                    if (supply.get("poNumber").asString().equals(po)) {
+                        assertThat(alloc.get("expectedAt").asString()).isEqualTo(supply.get("arrives").asString());
+                    }
+                }
+            }
             assertThat(atp.get("promisable").asBoolean()).isEqualTo(atp.hasNonNull("promiseDate"));
             assertThat(atp.get("timeline").size()).isGreaterThan(0);
         }

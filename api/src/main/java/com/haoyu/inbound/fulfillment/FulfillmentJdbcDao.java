@@ -38,6 +38,7 @@ public class FulfillmentJdbcDao {
                    po.po_number,
                    l.qty_ordered - l.qty_received as qty_outstanding,
                    coalesce(s.predicted_arrival, s.planned_arrival, po.planned_arrival) as expected_at,
+                   fc.receiving_buffer_days,
                    s.predicted_confidence
             from purchase_order_line l
             join purchase_order po on po.id = l.po_id
@@ -101,11 +102,14 @@ public class FulfillmentJdbcDao {
             setNullableString(stmt, 3, fcCode);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
+                    // "expected" means available to ship: arrival at the FC plus its dock-to-stock time,
+                    // the same date the ATP path uses, so the two quotes never disagree about a PO
+                    LocalDate expected = rs.getObject("expected_at", LocalDate.class).plusDays(rs.getInt("receiving_buffer_days"));
                     lines.add(new InboundLine(
                             rs.getLong("id"),
                             rs.getString("po_number"),
                             rs.getInt("qty_outstanding"),
-                            rs.getObject("expected_at", LocalDate.class),
+                            expected,
                             rs.getString("predicted_confidence")));
                 }
             }
