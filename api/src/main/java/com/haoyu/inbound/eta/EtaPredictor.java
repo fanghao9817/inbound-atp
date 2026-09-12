@@ -43,8 +43,9 @@ public final class EtaPredictor {
             arrival = today.plusDays(1);
         }
         Confidence confidence = confidence(s.sampleN(), m.type());
-        String basis = String.format("P80 of %d shipments %s from %s: %.1f d (P50 %.1f d), milestone on %s",
-                s.sampleN(), lane, m.type(), s.p80Days(), s.p50Days(), milestoneDate);
+        // show the whole days actually added: %.1f would print 28.04 as "28.0" while ceil() adds 29
+        String basis = String.format("P80 of %d shipments %s from %s: %.2f d → +%d d (P50 %.1f d), milestone on %s",
+                s.sampleN(), lane, m.type(), s.p80Days(), p80, s.p50Days(), milestoneDate);
         return new Prediction(arrival, confidence, basis);
     }
 
