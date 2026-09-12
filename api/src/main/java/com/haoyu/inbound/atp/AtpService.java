@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -46,8 +47,12 @@ public class AtpService {
         this.clock = clock;
     }
 
-    /** Full explanation for one SKU at one FC: the timeline and every supply/demand line behind it. */
-    @Transactional(readOnly = true)
+    /**
+     * Full explanation for one SKU at one FC: the timeline and every supply/demand line behind it.
+     * REPEATABLE_READ so the inventory, inbound and demand queries all see one snapshot - the same
+     * guarantee the plain-JDBC fulfillment path sets by hand.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public AtpQuote quote(String skuCode, String fcCode, int qty) {
         requirePositive(qty);
         Sku sku = catalog.requireSku(skuCode);
@@ -75,7 +80,7 @@ public class AtpService {
     }
 
     /** One line per FC so a storefront can pick where to promise from. */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public List<FcSummary> summary(String skuCode, int qty) {
         requirePositive(qty);
         catalog.requireSku(skuCode);
