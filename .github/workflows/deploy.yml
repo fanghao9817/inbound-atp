@@ -84,6 +84,7 @@ jobs:
             cd data
             export DBT_PG_HOST=127.0.0.1 DBT_PG_PASSWORD=$(grep POSTGRES_PASSWORD ../infra/.env | cut -d= -f2)
             ~/dbt-venv/bin/dbt build --profiles-dir .
+            ../scripts/publish-dbt-docs.sh
             if [ -f ~/.config/inbound-atp/databricks.env ]; then
               set -a; . ~/.config/inbound-atp/databricks.env; set +a
               ~/dbt-venv/bin/dbt build --profiles-dir . --target databricks

@@ -85,6 +85,24 @@ services:
     mem_limit: 768m
     restart: unless-stopped
 
+  # Kafka browser for humans. Bound to localhost only: reach it through an SSH tunnel
+  # (ssh -L 8081:127.0.0.1:8081), never through the public firewall.
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: inbound-kafka-ui
+    environment:
+      KAFKA_CLUSTERS_0_NAME: inbound
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+      JAVA_OPTS: "-Xmx256m"
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
 volumes:
   pgdata:
   kafkadata:
