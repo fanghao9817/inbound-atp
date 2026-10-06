@@ -56,6 +56,7 @@ class Customers {
 
     @Scheduled(fixedDelay = 60_000, initialDelay = 30_000)
     void online() {
+        heartbeat.beat();                                       // alive, even while paused
         if (!props.enabled()) return;
         Instant now = clock.instant();
         Instant thisHour = now.truncatedTo(ChronoUnit.HOURS);
@@ -85,7 +86,6 @@ class Customers {
         } catch (RuntimeException e) {
             log.warn("online customers tick failed: {}", e.toString());
         }
-        heartbeat.beat();
         if (placed > 0) log.debug("online customers: {} orders placed", placed);
     }
 

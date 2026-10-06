@@ -39,14 +39,12 @@ class CarrierFeed {
     private final SimProperties props;
     private final GoLive goLive;
     private final Clock clock;
-    private final Heartbeat heartbeat;
 
-    CarrierFeed(ApiClient api, SimProperties props, GoLive goLive, Clock clock, Heartbeat heartbeat) {
+    CarrierFeed(ApiClient api, SimProperties props, GoLive goLive, Clock clock) {
         this.api = api;
         this.props = props;
         this.goLive = goLive;
         this.clock = clock;
-        this.heartbeat = heartbeat;
     }
 
     @Scheduled(fixedDelay = 300_000, initialDelay = 20_000)
@@ -85,7 +83,6 @@ class CarrierFeed {
         } catch (RuntimeException e) {
             log.warn("carrier feed tick failed: {}", e.toString());
         }
-        heartbeat.beat();
         if (reported + received > 0) log.info("carrier feed: {} milestones reported, {} containers put away", reported, received);
     }
 

@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 ./scripts/backup-db.sh pre-deploy
 ( cd api && mvn -q -B -DskipTests package )
 ( cd simulator && mvn -q -B -DskipTests package )
-( cd infra && docker compose up -d --build --wait --wait-timeout 180 ) || {
+( cd infra && docker compose up -d --build --wait --wait-timeout 300 ) || {
   echo "containers did not become healthy"; docker logs --tail 80 inbound-api; exit 1; }
 ./scripts/render-nginx.sh
 echo "api ready"

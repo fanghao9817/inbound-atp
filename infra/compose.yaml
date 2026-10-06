@@ -110,6 +110,7 @@ services:
       timeout: 5s
       retries: 6
       start_period: 120s
+      start_interval: 5s
     mem_limit: 384m
     restart: unless-stopped
 
