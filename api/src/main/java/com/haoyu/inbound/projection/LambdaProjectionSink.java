@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
@@ -20,7 +20,8 @@ import tools.jackson.databind.ObjectMapper;
  * Kafka consumer. Credentials come from the default provider chain (env vars in compose).
  */
 @Component
-@ConditionalOnProperty(prefix = "app.aws", name = "projector-function")
+// not @ConditionalOnProperty: an empty value (PROJECTOR_FUNCTION unset) counts as present there
+@ConditionalOnExpression("'${app.aws.projector-function:}'.trim() != ''")
 class LambdaProjectionSink implements ProjectionSink {
 
     private static final Logger log = LoggerFactory.getLogger(LambdaProjectionSink.class);

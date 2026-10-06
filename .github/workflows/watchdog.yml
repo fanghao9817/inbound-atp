@@ -1,0 +1,32 @@
+name: watchdog
+
+# Hourly check, from outside the box, that the live demo is up and its world is still moving.
+# A failed scheduled run makes GitHub email the repository owner, which is the whole alerting system.
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: demo answers and data is flowing
+        env:
+          BASE: https://demo.haoyufang.dev
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --retry-delay 20 "$BASE/health" | jq -e '.status == "UP"' >/dev/null
+          k=$(curl -fsS --retry 3 --retry-delay 20 "$BASE/api/dashboard/kpis")
+          echo "$k" | jq '{asOf, minutesSinceLastOrder, minutesSinceLastMilestone, outboxPending, outboxOldestSeconds}'
+          fail=0
+          # a customer order at least every 6 hours (night-time rate is still several per hour)
+          echo "$k" | jq -e '.minutesSinceLastOrder != null and .minutesSinceLastOrder < 360' >/dev/null || { echo "::error::no customer order for 6 hours - simulator stopped?"; fail=1; }
+          # a carrier, customs or warehouse milestone at least every 3 days
+          echo "$k" | jq -e '.minutesSinceLastMilestone != null and .minutesSinceLastMilestone < 4320' >/dev/null || { echo "::error::no milestone for 3 days"; fail=1; }
+          # events leave the outbox within 10 minutes (Kafka reachable)
+          echo "$k" | jq -e '(.outboxOldestSeconds // 0) < 600' >/dev/null || { echo "::error::outbox is backing up - Kafka down?"; fail=1; }
+          exit $fail

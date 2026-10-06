@@ -1,6 +1,7 @@
 name: deploy
 
-# Manual, or automatically after a green ci run on main.
+# Manual, or automatically after a green ci run triggered by a push to main of this repository
+# (never a fork's pull request), deploying exactly the commit ci tested.
 # Box: DEPLOY_HOST (34.208.44.222), DEPLOY_USER (ubuntu), DEPLOY_SSH_KEY repository secrets.
 # AWS: no keys — GitHub's OIDC token assumes the role created by infra/aws/bootstrap.yaml.
 on:
@@ -23,18 +24,18 @@ env:
 jobs:
   aws:
     name: aws · deploy SAM stack via OIDC
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' || (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     outputs:
       availability_url: ${{ steps.outputs.outputs.availability_url }}
       projector_function: ${{ steps.outputs.outputs.projector_function }}
     steps:
       - uses: actions/checkout@v4
-      - name: show OIDC token claims (sub / aud / iss only)
-        run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
-          echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' | { read p; printf '%s%s' "$p" "$(printf '%*s' $(( (4 - ${#p} % 4) % 4 )) '' | tr ' ' '=')"; } | base64 -d 2>/dev/null \
-            | python3 -c 'import json,sys; c=json.load(sys.stdin); print({k: c.get(k) for k in ("sub","aud","iss","repository","ref","event_name","job_workflow_ref")})'
+        with: { ref: "${{ github.event.workflow_run.head_sha || github.sha }}" }
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE }}
@@ -47,11 +48,12 @@ jobs:
           echo "projector_function=$(get ProjectorFunctionName)" >> "$GITHUB_OUTPUT"
 
   box:
-    name: box · web + api + dbt (postgres, databricks)
+    name: box · web + api + simulator + dbt
     needs: aws
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.workflow_run.head_sha || github.sha }}" }
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json }
       - name: build web
@@ -60,13 +62,13 @@ jobs:
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          grep -v '^#' infra/ssh_known_hosts > ~/.ssh/known_hosts   # pinned host keys, no trust-on-first-use
       - name: sync sources and web build
         run: |
-          rsync -az --delete --exclude .git --exclude api/target --exclude web/node_modules --exclude .venv \
-            --exclude 'infra/.env' -e "ssh -i ~/.ssh/deploy" ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/${{ secrets.DEPLOY_USER }}/inbound-atp/"
+          rsync -az --delete --exclude .git --exclude api/target --exclude simulator/target --exclude web/node_modules --exclude .venv \
+            --exclude 'infra/.env' --exclude 'data/seeds/*.csv' --exclude 'data/target' --exclude 'data/logs' -e "ssh -i ~/.ssh/deploy" ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/${{ secrets.DEPLOY_USER }}/inbound-atp/"
           rsync -az --delete --exclude '.well-known' -e "ssh -i ~/.ssh/deploy" web/dist/ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/var/www/demo/"
-      - name: roll out api, refresh dbt models on both warehouses, re-score + re-project
+      - name: roll out api + simulator, refresh dbt models, re-score
         env:
           AVAILABILITY_URL: ${{ needs.aws.outputs.availability_url }}
           PROJECTOR_FUNCTION: ${{ needs.aws.outputs.projector_function }}
@@ -75,19 +77,14 @@ jobs:
             AVAILABILITY_URL="$AVAILABILITY_URL" PROJECTOR_FUNCTION="$PROJECTOR_FUNCTION" bash -s <<'REMOTE'
             set -euo pipefail
             cd ~/inbound-atp
+            . scripts/lib.sh
             # keep the box's runtime config in step with the stack outputs
             for k in AVAILABILITY_URL PROJECTOR_FUNCTION; do
-              v="${!k}"; [ -z "$v" ] && continue
-              grep -q "^$k=" infra/.env && sed -i "s|^$k=.*|$k=$v|" infra/.env || echo "$k=$v" >> infra/.env
+              v="${!k}"; [ -n "$v" ] && env_set "$k" "$v"
             done
             ./scripts/deploy-api.sh
-            cd data
-            export DBT_PG_HOST=127.0.0.1 DBT_PG_PASSWORD=$(grep POSTGRES_PASSWORD ../infra/.env | cut -d= -f2)
-            ~/dbt-venv/bin/dbt build --profiles-dir .
-            ../scripts/publish-dbt-docs.sh
-            if [ -f ~/.config/inbound-atp/databricks.env ]; then
-              set -a; . ~/.config/inbound-atp/databricks.env; set +a
-              ~/dbt-venv/bin/dbt build --profiles-dir . --target databricks
-            fi
-            curl -fsS -X POST http://127.0.0.1:8080/api/eta/recalculate-all
+            dbt_pg build --quiet
+            ./scripts/publish-dbt-docs.sh
+            ./scripts/install-timers.sh >/dev/null
+            internal_post eta/recalculate-all
           REMOTE

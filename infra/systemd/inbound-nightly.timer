@@ -1,0 +1,10 @@
+[Unit]
+Description=inbound-atp nightly job at 00:30 Vancouver time
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 America/Vancouver
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

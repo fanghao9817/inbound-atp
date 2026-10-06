@@ -21,3 +21,6 @@ infra/certs/
 .vscode/
 *.iml
 .DS_Store
+
+# Databricks snapshot, exported weekly on the box (scripts/weekly-databricks.sh)
+data/seeds/*.csv

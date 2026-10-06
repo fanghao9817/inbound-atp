@@ -1,0 +1,72 @@
+# A throwaway copy of the stack for testing a branch on the box next to the live one: own network,
+# own volumes, no Lambda, nothing published except the API on 127.0.0.1:18080.
+#   cd infra && docker compose -f compose.dev.yaml up -d --build      (after mvn package in api/ and simulator/)
+#   docker compose -f compose.dev.yaml down -v                          (removes everything, data included)
+name: inbound-dev
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: inbound-dev-postgres
+    environment: { POSTGRES_DB: inbound, POSTGRES_USER: inbound, POSTGRES_PASSWORD: dev }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U inbound -d inbound"], interval: 5s, timeout: 3s, retries: 20 }
+    mem_limit: 512m
+
+  kafka:
+    image: apache/kafka:4.1.2
+    container_name: inbound-dev-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xmx384m -Xms384m"
+      CLUSTER_ID: "inbound-dev-kraft-00000001"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    mem_limit: 768m
+
+  api:
+    build: ../api
+    image: inbound-atp-api:dev
+    container_name: inbound-dev-api
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/inbound
+      DB_PASSWORD: dev
+      KAFKA_BOOTSTRAP: kafka:9092
+      INTERNAL_API_TOKEN: dev-token
+      TZ: America/Vancouver
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    mem_limit: 768m
+
+  simulator:
+    build: ../simulator
+    image: inbound-atp-simulator:dev
+    container_name: inbound-dev-simulator
+    environment:
+      API_BASE_URL: http://api:8080
+      INTERNAL_API_TOKEN: dev-token
+      SIM_SEED: dev-seed
+      SIM_GO_LIVE: ${SIM_GO_LIVE:-}
+    depends_on:
+      api: { condition: service_healthy }
+    mem_limit: 384m

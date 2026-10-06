@@ -70,6 +70,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       PROJECTOR_FUNCTION: ${PROJECTOR_FUNCTION:-}
       AVAILABILITY_URL: ${AVAILABILITY_URL:-}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -86,6 +87,30 @@ services:
       retries: 30
       start_period: 40s
     mem_limit: 768m
+    restart: unless-stopped
+
+  # Synthetic carriers, warehouse, customers and buyer. Talks to the API over this network only,
+  # with the internal token; no database access, no published port. See simulator/README.md.
+  simulator:
+    build: ../simulator
+    image: inbound-atp-simulator:local
+    container_name: inbound-simulator
+    environment:
+      API_BASE_URL: http://api:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      SIM_SEED: ${SIM_SEED:-}
+      SIM_GO_LIVE: ${SIM_GO_LIVE:-}
+      SIM_ENABLED: ${SIM_ENABLED:-true}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/heartbeat -mmin -2 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
+    mem_limit: 384m
     restart: unless-stopped
 
   # Kafka browser for humans. Bound to localhost only: reach it through an SSH tunnel

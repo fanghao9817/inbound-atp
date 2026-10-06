@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: inbound-atp-simulator
+  main:
+    web-application-type: none          # an external actor, not a service: no HTTP server
+  task:
+    scheduling:
+      pool:
+        size: 3
+
+sim:
+  enabled: ${SIM_ENABLED:true}
+  api-base-url: ${API_BASE_URL:http://localhost:8080}
+  token: ${INTERNAL_API_TOKEN:}
+  seed: ${SIM_SEED:demo-seed}           # every "random" choice is a hash of this seed, so a restart repeats nothing
+  go-live: ${SIM_GO_LIVE:}              # ISO instant; default = first start
+  base-weekly-units: 675                # network demand, calibrated to the supply pipeline (see README)
+  heartbeat-file: /tmp/heartbeat
+
+logging:
+  level:
+    com.haoyu.inboundsim: INFO

@@ -110,8 +110,13 @@ class DemoDataSeeder implements CommandLineRunner {
         }
         var scored = recalculation.recalculateAllOpen(EtaRecalculationService.Reason.SEED);
         log.info("initial ETA scoring: {} open shipments, {} predictions set", scored.shipments(), scored.changed());
-        var projected = projection.projectAll();
-        log.info("initial storefront projection: {} rows", projected.items());
+        try {
+            var projected = projection.projectAll();
+            log.info("initial storefront projection: {} rows", projected.items());
+        } catch (RuntimeException e) {
+            // the data is committed; the projection catches up with the next availability.changed or project-all
+            log.warn("initial storefront projection failed, continuing: {}", e.toString());
+        }
     }
 
     private void seed(Connection conn) throws SQLException {
@@ -254,9 +259,10 @@ class DemoDataSeeder implements CommandLineRunner {
         // History is received at least a day ago; an open container departed recently enough that it
         // cannot have been received yet (some have not even departed). Transit is drawn first, so the
         // departure can be chosen to make that true.
+        // (booking is never later than today: a PO dated in the future would be data from the future)
         LocalDate departed = history
                 ? today.minusDays(toReceived + 1L + rnd.nextInt(330))
-                : today.minusDays(rnd.nextInt(Math.max(1, toReceived))).plusDays(rnd.nextInt(12));
+                : today.minusDays(rnd.nextInt(Math.max(1, toReceived))).plusDays(rnd.nextInt(bookedLead + 1));
         LocalDate booked = departed.minusDays(bookedLead);
         // carriers quote a conservative plan; only containers that are genuinely slow (port delays, bad weeks) end up late vs plan
         LocalDate plannedArrival = departed.plusDays((int) Math.round(lane.medianDays() * 0.78) + 11);
@@ -269,7 +275,7 @@ class DemoDataSeeder implements CommandLineRunner {
                 """, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, poNumber); ps.setString(2, supplier); ps.setString(3, lane.origin());
             ps.setLong(4, fcIds.get(lane.fc())); ps.setString(5, history ? "RECEIVED" : "OPEN");
-            ps.setObject(6, plannedArrival); ps.setObject(7, booked.atStartOfDay(clock.getZone()).toOffsetDateTime());   // PO placed = booked
+            ps.setObject(6, plannedArrival); ps.setObject(7, bookedAt(booked, seededAt));   // PO placed = booked
             ps.executeUpdate();
             poId = generatedId(ps);
         }
@@ -294,6 +300,7 @@ class DemoDataSeeder implements CommandLineRunner {
         for (int i = 0; i < 5; i++) {
             at[i] = departed.plusDays(offsets[i]).atTime(6 + rnd.nextInt(12), rnd.nextInt(60)).atZone(clock.getZone()).toOffsetDateTime();
         }
+        at[0] = bookedAt(booked, seededAt);                                     // every PO is booked, so every container has a timeline
         int reached = 0;
         while (reached < 5 && !at[reached].isAfter(seededAt)) reached++;
         MilestoneType stage = reached == 0 ? MilestoneType.BOOKED : types[reached - 1];
@@ -310,15 +317,27 @@ class DemoDataSeeder implements CommandLineRunner {
             shipmentId = generatedId(ps);
         }
 
+        // recorded = when the message reached us: EDI arrives 1-6 hours after the event, the WMS within the hour,
+        // the booking at once - never after the seeding instant
         try (PreparedStatement ps = conn.prepareStatement(
-                "insert into shipment_milestone (shipment_id, type, occurred_at, source, event_id) values (?, ?, ?, ?, ?)")) {
+                "insert into shipment_milestone (shipment_id, type, occurred_at, source, event_id, recorded_at) values (?, ?, ?, ?, ?, ?)")) {
             for (int i = 0; i < reached; i++) {
+                String source = i == 0 ? "BUYER" : i == 4 ? "WMS" : i == 3 ? "CUSTOMS_BROKER" : "CARRIER_EDI";
+                int lagMinutes = i == 0 ? 0 : i == 4 ? 5 + rnd.nextInt(55) : 60 + rnd.nextInt(300);
+                OffsetDateTime recorded = at[i].plusMinutes(lagMinutes);
                 ps.setLong(1, shipmentId); ps.setString(2, types[i].name()); ps.setObject(3, at[i]);
-                ps.setString(4, i == 4 ? "WMS" : "CARRIER_EDI"); ps.setObject(5, UUID.randomUUID());
+                ps.setString(4, source); ps.setObject(5, UUID.randomUUID());
+                ps.setObject(6, recorded.isAfter(seededAt) ? seededAt : recorded);
                 ps.addBatch();
             }
             ps.executeBatch();
         }
+    }
+
+    /** The booking moment: 09:00 on the booking day, or just before seeding if that is still to come today. */
+    private OffsetDateTime bookedAt(LocalDate booked, OffsetDateTime seededAt) {
+        OffsetDateTime at = booked.atTime(9, 0).atZone(clock.getZone()).toOffsetDateTime();
+        return at.isAfter(seededAt) ? seededAt.minusMinutes(5) : at;
     }
 
     private static long generatedId(PreparedStatement ps) throws SQLException {

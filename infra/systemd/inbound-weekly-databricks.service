@@ -1,0 +1,9 @@
+[Unit]
+Description=inbound-atp weekly: snapshot to Databricks and build the lane models there
+After=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/home/ubuntu/inbound-atp/scripts/weekly-databricks.sh
+TimeoutStartSec=45min

@@ -1,0 +1,5 @@
+# Host keys of the demo box, pinned so the deploy workflow does not trust whatever answers on port 22
+# (ssh-keyscan at deploy time would). Public keys; safe to commit. Regenerate if the box is rebuilt:
+#   ssh ubuntu@<host> cat /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ecdsa_key.pub
+34.208.44.222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKhbV2tD3H2uO073cRX+crjX/Ey9jqPZ4VulT9q9Fj+u
+34.208.44.222 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKJRD9LqzbLAFOekKw2iSkj0VWycwlkZp+NxZrqfd4MBeNR96hwUuuFAFZF8s6Nf9xd0gCO7UAIaA9eC0Kmw0h4=

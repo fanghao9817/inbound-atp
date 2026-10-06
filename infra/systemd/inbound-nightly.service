@@ -1,0 +1,10 @@
+[Unit]
+Description=inbound-atp nightly: backup, dbt build + freshness, docs, re-score
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/home/ubuntu/inbound-atp/scripts/nightly.sh
+TimeoutStartSec=30min
