@@ -20,8 +20,8 @@ public class OrderRepository {
             """;
 
     private static final String VIEW_SELECT = """
-            select o.id, o.order_ref, o.channel, sku.code as sku, fc.code as fc, o.qty, o.status, o.promise_date, o.need_by,
-                   o.created_at, o.reserved_at, o.shipped_at, o.cancelled_at
+            select o.id, o.order_ref, o.channel, o.origin, sku.code as sku, fc.code as fc, o.qty, o.status, o.promise_date,
+                   o.first_promise_date, o.need_by, o.created_at, o.reserved_at, o.shipped_at, o.cancelled_at
             from customer_order o
             join sku on sku.id = o.sku_id
             join fulfillment_center fc on fc.id = o.fc_id
@@ -33,14 +33,14 @@ public class OrderRepository {
         this.jdbc = jdbc;
     }
 
-    public long insert(String orderRef, Channel channel, long skuId, long fcId, int qty, OrderStatus status,
+    public long insert(String orderRef, Channel channel, Origin origin, long skuId, long fcId, int qty, OrderStatus status,
                        LocalDate promiseDate, LocalDate needBy, boolean reservedNow) {
         return jdbc.sql("""
-                insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by, reserved_at)
-                values (:ref, :channel, :sku, :fc, :qty, :status, :promise, :promise, :needBy, case when :reservedNow then now() end)
+                insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by, reserved_at)
+                values (:ref, :channel, :origin, :sku, :fc, :qty, :status, :promise, :promise, :needBy, case when :reservedNow then now() end)
                 returning id
                 """)
-                .param("ref", orderRef).param("channel", channel.name()).param("sku", skuId).param("fc", fcId)
+                .param("ref", orderRef).param("channel", channel.name()).param("origin", origin.name()).param("sku", skuId).param("fc", fcId)
                 .param("qty", qty).param("status", status.name())
                 .param("promise", promiseDate, Types.DATE).param("needBy", needBy, Types.DATE)
                 .param("reservedNow", reservedNow)
@@ -117,6 +117,21 @@ public class OrderRepository {
     public void markShipped(long id) {
         jdbc.sql("update customer_order set status = 'SHIPPED', shipped_at = now(), version = version + 1 where id = :id")
                 .param("id", id).update();
+    }
+
+    /** Visitor orders hold stock like a shopping-cart hold: released if not completed within the hour. */
+    public List<Long> expiredVisitorOrders() {
+        return jdbc.sql("""
+                select id from customer_order
+                where origin = 'VISITOR' and status in ('RESERVED', 'SCHEDULED', 'BACKORDERED')
+                  and created_at < now() - interval '1 hour'
+                order by id
+                """).query(Long.class).list();
+    }
+
+    public int visitorOrdersSince(java.time.OffsetDateTime since) {
+        return jdbc.sql("select count(*) from customer_order where origin = 'VISITOR' and created_at >= :since")
+                .param("since", since).query(Integer.class).single();
     }
 
     public void markCancelled(long id) {

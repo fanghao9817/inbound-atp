@@ -19,11 +19,22 @@ class ShipmentController {
     private final ShipmentRepository shipments;
     private final ShipmentService service;
     private final ReceivingService receiving;
+    private final com.haoyu.inbound.eta.EtaPreviewService preview;
 
-    ShipmentController(ShipmentRepository shipments, ShipmentService service, ReceivingService receiving) {
+    ShipmentController(ShipmentRepository shipments, ShipmentService service, ReceivingService receiving,
+                       com.haoyu.inbound.eta.EtaPreviewService preview) {
         this.shipments = shipments;
         this.service = service;
         this.receiving = receiving;
+        this.preview = preview;
+    }
+
+    record PreviewRequest(@NotNull MilestoneType type, @NotNull OffsetDateTime occurredAt) {}
+
+    /** What-if for visitors: the prediction we WOULD make if this milestone happened. Writes nothing. */
+    @PostMapping("/api/shipments/{id}/eta-preview")
+    com.haoyu.inbound.eta.EtaPreviewService.Preview etaPreview(@PathVariable long id, @Valid @RequestBody PreviewRequest req) {
+        return preview.preview(id, req.type(), req.occurredAt());
     }
 
     record ShipmentView(Shipment shipment, ShipmentRepository.LaneOf lane, List<ShipmentMilestone> milestones) {}

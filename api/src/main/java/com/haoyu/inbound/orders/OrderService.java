@@ -25,7 +25,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class OrderService {
 
-    public record PlaceOrder(String orderRef, Channel channel, String sku, String fc, int qty, LocalDate needBy) {}
+    public record PlaceOrder(String orderRef, Channel channel, Origin origin, String sku, String fc, int qty, LocalDate needBy) {}
 
     /** @param created false when the order_ref already existed (idempotent replay) */
     public record PlaceResult(OrderView order, boolean created) {}
@@ -93,7 +93,8 @@ public class OrderService {
             case BACKORDER -> OrderStatus.BACKORDERED;
             case REJECT -> OrderStatus.REJECTED;
         };
-        long id = orders.insert(cmd.orderRef(), channel, sku.id(), fc.id(), cmd.qty(), status, d.promiseDate(), cmd.needBy(),
+        Origin origin = cmd.origin() == null ? Origin.FEED : cmd.origin();
+        long id = orders.insert(cmd.orderRef(), channel, origin, sku.id(), fc.id(), cmd.qty(), status, d.promiseDate(), cmd.needBy(),
                 status == OrderStatus.RESERVED);
         if (status == OrderStatus.RESERVED) {
             inventory.reserve(sku.id(), fc.id(), cmd.qty(), new Ref("ORDER", id));
@@ -102,8 +103,8 @@ public class OrderService {
         if (status != OrderStatus.REJECTED) {
             availability.changed(sku.code(), fc.code(), "order " + status.name().toLowerCase());
         }
-        meters.counter("orders.placed", "channel", channel.name(), "status", status.name()).increment();
-        meters.counter("orders.units", "channel", channel.name(), "status", status.name()).increment(cmd.qty());
+        meters.counter("orders.placed", "channel", channel.name(), "origin", origin.name(), "status", status.name()).increment();
+        meters.counter("orders.units", "channel", channel.name(), "origin", origin.name(), "status", status.name()).increment(cmd.qty());
         return id;
     }
 
@@ -115,6 +116,19 @@ public class OrderService {
                 .map(AtpService.FcSummary::fc)
                 .orElseGet(() -> catalog.listFcs().getFirst().code());
         return catalog.requireFc(best);
+    }
+
+    /** Visitor orders hold stock for an hour at most (like a cart hold); then they are cancelled. */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 600_000, initialDelay = 60_000)
+    void expireVisitorOrders() {
+        for (long id : orders.expiredVisitorOrders()) {
+            try {
+                // a self-call bypasses the @Transactional proxy on cancel(), so open the transaction explicitly
+                readCommitted.executeWithoutResult(status -> cancel(id));
+            } catch (RuntimeException e) {
+                org.slf4j.LoggerFactory.getLogger(OrderService.class).warn("could not expire visitor order {}: {}", id, e.toString());
+            }
+        }
     }
 
     /** Picks and ships a reserved order. Shipping an already shipped order is a no-op. */

@@ -32,6 +32,9 @@ class PurchaseOrderController {
             @RequestParam(defaultValue = "OPEN") String status,
             @RequestParam(defaultValue = "200") int limit) {
         String s = "ALL".equalsIgnoreCase(status) ? null : status.toUpperCase();
+        if (s != null && !java.util.Set.of("OPEN", "RECEIVED", "CANCELLED").contains(s)) {
+            throw new IllegalArgumentException("status must be OPEN, RECEIVED, CANCELLED or ALL");
+        }
         return queries.list(s, Math.min(limit, 1000));
     }
 }

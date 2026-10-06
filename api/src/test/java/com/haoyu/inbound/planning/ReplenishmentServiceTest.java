@@ -7,32 +7,33 @@ import org.junit.jupiter.api.Test;
 class ReplenishmentServiceTest {
 
     @Test
-    void ordersUpToTargetInCasePacksWhenCoverIsBelowTheReorderPoint() {
-        // 40 units in 28 days = 10/week; position 30 + 20 - 0 = 50 -> 5 weeks of cover < 8
-        var s = ReplenishmentService.evaluate("SKU", "FC", 40, 30, 20, 0, 8, 14);
-        assertThat(s.weeklyDemand()).isEqualTo(10.0);
-        assertThat(s.weeksOfCover()).isEqualTo(5.0);
-        assertThat(s.suggestedQty()).isEqualTo(90);   // 14 x 10 - 50 = 90
+    void atGoLiveTheForecastIsThePrior() {
+        // no history yet: f = prior 14/week; L = 42 d = 6 weeks -> S = 14 x (6 + 1 + 2) = 126
+        var l = ReplenishmentService.evaluate("SKU", "FC", "VNSGN", "S", 0, 0, 14, 42, 30, 20, 0);
+        assertThat(l.weeklyDemand()).isEqualTo(14.0);
+        assertThat(l.orderUpTo()).isEqualTo(126);
+        assertThat(l.suggestedQty()).isEqualTo(80);          // 126 - 50 = 76 -> case pack of 5 -> 80
     }
 
     @Test
-    void enoughCoverMeansNoOrder() {
-        var s = ReplenishmentService.evaluate("SKU", "FC", 40, 60, 40, 0, 8, 14);
-        assertThat(s.weeksOfCover()).isEqualTo(10.0);
-        assertThat(s.suggestedQty()).isZero();
+    void afterFourWeeksTheObservedRateTakesOver() {
+        // 80 units in 28 days = 20/week, prior ignored
+        var l = ReplenishmentService.evaluate("SKU", "FC", "VNSGN", "S", 80, 28, 14, 42, 30, 20, 0);
+        assertThat(l.weeklyDemand()).isEqualTo(20.0);
+        assertThat(l.orderUpTo()).isEqualTo(180);
     }
 
     @Test
-    void backordersReduceThePosition() {
-        var s = ReplenishmentService.evaluate("SKU", "FC", 40, 30, 20, 25, 8, 14);
-        assertThat(s.position()).isEqualTo(25);
-        assertThat(s.suggestedQty()).isEqualTo(120);  // 140 - 25 = 115 -> 120
+    void halfwayTheyBlend() {
+        // 14 days observed, 40 units -> 20/week observed; weight 0.5 -> (20 + 14) / 2 = 17
+        var l = ReplenishmentService.evaluate("SKU", "FC", "VNSGN", "S", 40, 14, 14, 42, 0, 0, 0);
+        assertThat(l.weeklyDemand()).isEqualTo(17.0);
     }
 
     @Test
-    void noDemandMeansNoOrderAndInfiniteCover() {
-        var s = ReplenishmentService.evaluate("SKU", "FC", 0, 0, 0, 0, 8, 14);
-        assertThat(s.suggestedQty()).isZero();
-        assertThat(s.weeksOfCover()).isEqualTo(999);
+    void commitmentsReducePositionAndSmallNeedsAreNotOrdered() {
+        var l = ReplenishmentService.evaluate("SKU", "FC", "VNSGN", "S", 0, 0, 14, 42, 100, 60, 40);
+        assertThat(l.position()).isEqualTo(120);
+        assertThat(l.suggestedQty()).isZero();               // 126 - 120 = 6 < minimum order of 10
     }
 }

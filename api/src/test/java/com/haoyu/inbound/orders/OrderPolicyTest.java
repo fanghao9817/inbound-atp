@@ -31,9 +31,15 @@ class OrderPolicyTest {
     }
 
     @Test
-    void b2bNeededInAMonthDoesNotLockTodaysStock() {
+    void b2bNeededInAMonthIsScheduledAndLocksNoStockToday() {
         Decision d = OrderPolicy.decide(TODAY.plusDays(30), TODAY, Optional.of(TODAY), WINDOW);
-        assertThat(d).isEqualTo(new Decision(Action.BACKORDER, TODAY.plusDays(30)));
+        assertThat(d).isEqualTo(new Decision(Action.SCHEDULE, TODAY.plusDays(30)));
+    }
+
+    @Test
+    void b2bNeededInAMonthButCoverableOnlyLaterIsBackorderedAtTheLaterDate() {
+        Decision d = OrderPolicy.decide(TODAY.plusDays(30), TODAY, Optional.of(TODAY.plusDays(45)), WINDOW);
+        assertThat(d).isEqualTo(new Decision(Action.BACKORDER, TODAY.plusDays(45)));
     }
 
     @Test

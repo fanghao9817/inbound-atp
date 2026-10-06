@@ -34,7 +34,10 @@ public class PurchaseOrderQueryRepository {
                 with po_page as (
                     select po.* from purchase_order po
                     where po.status = coalesce(:status, po.status)
-                    order by po.planned_arrival, po.id
+                    -- open POs soonest first; received history newest first (otherwise "ALL" shows only old history)
+                    order by (po.status = 'OPEN') desc,
+                             case when po.status = 'OPEN' then po.planned_arrival end asc,
+                             po.planned_arrival desc, po.id desc
                     limit :limit
                 )
                 select po.id, po.po_number, po.supplier, po.origin_port, fc.code as dest_fc, po.status, po.planned_arrival,
@@ -47,7 +50,8 @@ public class PurchaseOrderQueryRepository {
                 left join shipment s on s.po_id = po.id
                 join purchase_order_line l on l.po_id = po.id
                 join sku on sku.id = l.sku_id
-                order by po.planned_arrival, po.id, sku.code
+                order by (po.status = 'OPEN') desc, case when po.status = 'OPEN' then po.planned_arrival end asc,
+                         po.planned_arrival desc, po.id desc, sku.code
                 """)
                 .param("status", status, java.sql.Types.VARCHAR)
                 .param("limit", limit)

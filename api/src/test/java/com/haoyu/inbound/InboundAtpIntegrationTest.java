@@ -8,7 +8,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
-import com.haoyu.inbound.projection.AvailabilityItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -29,7 +28,7 @@ import tools.jackson.databind.ObjectMapper;
  * other → a milestone flows through Kafka into a new prediction → replays are ignored → refreshed lane
  * statistics change the prediction and its confidence.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "app.seed.enabled=true")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"app.seed.enabled=true", "app.internal-token=test-token"})
 @Import({TestcontainersConfig.class, TestProjectionConfig.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class InboundAtpIntegrationTest {
@@ -58,7 +57,8 @@ class InboundAtpIntegrationTest {
     }
 
     private JsonNode post(String path, Object body) {
-        return json.readTree(http.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(String.class));
+        return json.readTree(http.post().uri(path).contentType(MediaType.APPLICATION_JSON)
+                .header("X-Internal-Token", "test-token").body(body).retrieve().body(String.class));
     }
 
     @Test
@@ -76,7 +76,7 @@ class InboundAtpIntegrationTest {
         });
         JsonNode config = get("/api/config");
         assertThat(config.get("projectionEnabled").asBoolean()).isFalse();
-        assertThat(post("/api/availability/project-all", Map.of()).get("items").asInt()).isGreaterThanOrEqualTo(48);
+        assertThat(post("/api/internal/availability/project-all", Map.of()).get("items").asInt()).isGreaterThanOrEqualTo(48);
     }
 
     @Test
@@ -124,7 +124,7 @@ class InboundAtpIntegrationTest {
         UUID eventId = UUID.randomUUID();
         Map<String, Object> body = Map.of("type", "ARRIVED_DEST_PORT",
                 "occurredAt", OffsetDateTime.now(ZoneOffset.UTC).toString(), "source", "CARRIER_EDI", "eventId", eventId.toString());
-        assertThat(post("/api/shipments/" + shipmentId + "/milestones", body).get("accepted").asBoolean()).isTrue();
+        assertThat(post("/api/internal/shipments/" + shipmentId + "/milestones", body).get("accepted").asBoolean()).isTrue();
 
         final long id = shipmentId;
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
@@ -135,17 +135,16 @@ class InboundAtpIntegrationTest {
             assertThat(s.get("predictionBasis").asString()).contains("No lane history");
         });
 
-        // the second consumer of shipment.eta-updated re-projects the SKUs on that container at its destination FC
+        // the new prediction emits availability.changed for every SKU on the container; the projector follows
         String destFc = get("/api/shipments/" + shipmentId).get("lane").get("destFcCode").asString();
-        int batchesBefore = sink.batches.size();
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
                 assertThat(sink.batches).anySatisfy(b -> {
-                    assertThat(b.getKey()).isEqualTo("eta-updated");
+                    assertThat(b.getKey()).isEqualTo("availability-changed");
                     assertThat(b.getValue()).isNotEmpty().allSatisfy(i -> assertThat(i.fc()).isEqualTo(destFc));
-                    assertThat(b.getValue()).extracting(AvailabilityItem::source).containsOnly("eta-updated");
+                    assertThat(b.getValue()).allSatisfy(i -> assertThat(i.updatedAtMs()).isPositive());
                 }));
 
-        assertThat(post("/api/shipments/" + shipmentId + "/milestones", body).get("accepted").asBoolean()).isFalse();
+        assertThat(post("/api/internal/shipments/" + shipmentId + "/milestones", body).get("accepted").asBoolean()).isFalse();
         assertThat(get("/api/shipments/" + shipmentId).get("milestones")).hasSize(milestonesBefore + 1);
 
         // dbt would normally write this; simulate a refreshed lane statistic and re-score
@@ -158,8 +157,9 @@ class InboundAtpIntegrationTest {
                 .param("o", lane.get("originPort").asString())
                 .param("d", lane.get("destFcCode").asString())
                 .update();
-        JsonNode recalc = post("/api/eta/recalculate-all", Map.of());
-        assertThat(recalc.get("shipments").asInt()).isGreaterThan(0);
+        JsonNode recalc = post("/api/internal/eta/recalculate-all", Map.of());
+        assertThat(recalc.get("rescored").get("shipments").asInt()).isGreaterThan(0);
+        assertThat(recalc.get("rescored").get("failed").asInt()).isZero();
 
         JsonNode after = get("/api/shipments/" + shipmentId).get("shipment");
         assertThat(after.get("predictedConfidence").asString()).isEqualTo("HIGH");

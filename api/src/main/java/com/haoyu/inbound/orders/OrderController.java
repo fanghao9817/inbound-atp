@@ -21,36 +21,46 @@ class OrderController {
     private final OrderRepository orders;
     private final BackorderAllocator allocator;
     private final com.haoyu.inbound.common.AppProperties props;
+    private final java.time.Clock clock;
 
-    OrderController(OrderService service, OrderRepository orders, BackorderAllocator allocator, com.haoyu.inbound.common.AppProperties props) {
+    static final int VISITOR_DAILY_CAP = 200;
+
+    OrderController(OrderService service, OrderRepository orders, BackorderAllocator allocator,
+                    com.haoyu.inbound.common.AppProperties props, java.time.Clock clock) {
         this.service = service;
         this.orders = orders;
         this.allocator = allocator;
         this.props = props;
+        this.clock = clock;
     }
 
-    record PlaceOrderRequest(@NotBlank String orderRef, Channel channel, @NotBlank String sku, String fc,
-                             @Positive int qty, LocalDate needBy) {}
+    record PlaceOrderRequest(@NotBlank @jakarta.validation.constraints.Pattern(regexp = "[A-Z0-9-]{1,40}") String orderRef,
+                             Channel channel, @NotBlank String sku, String fc, @Positive int qty, LocalDate needBy) {}
 
     /** Storefront / B2B / store systems: 201 for a new order, 200 when the orderRef was already placed. */
     @PostMapping("/api/internal/orders")
     ResponseEntity<OrderView> place(@Valid @RequestBody PlaceOrderRequest r) {
-        return respond(service.place(new OrderService.PlaceOrder(r.orderRef(), r.channel(), r.sku(), r.fc(), r.qty(), r.needBy())));
+        return respond(service.place(new OrderService.PlaceOrder(r.orderRef(), r.channel(), Origin.FEED, r.sku(), r.fc(), r.qty(), r.needBy())));
     }
 
-    record VisitorOrderRequest(@NotBlank @jakarta.validation.constraints.Pattern(regexp = "VISIT-[A-Za-z0-9-]{6,40}") String orderRef,
-                               @NotBlank String sku, String fc, @Positive int qty) {}
+    record VisitorOrderRequest(@NotBlank String sku, String fc, @Positive int qty) {}
 
     /**
-     * A visitor trying the demo: an online order of at most a few units, labelled VISIT-..., going
-     * through exactly the same decision as every other order.
+     * A visitor trying the demo: an online order of a few units that goes through exactly the same
+     * decision as every other order. The reference is generated here, visitor orders are capped per
+     * day, excluded from the KPIs, and cancelled after an hour so they cannot drain stock.
      */
     @PostMapping("/api/orders")
     ResponseEntity<OrderView> placeAsVisitor(@Valid @RequestBody VisitorOrderRequest r) {
         if (r.qty() > props.orders().publicMaxQty()) {
             throw new IllegalArgumentException("visitors can order at most " + props.orders().publicMaxQty() + " units");
         }
-        return respond(service.place(new OrderService.PlaceOrder(r.orderRef(), Channel.ONLINE, r.sku(), r.fc(), r.qty(), null)));
+        var since = java.time.LocalDate.now(clock).atStartOfDay(clock.getZone()).toOffsetDateTime();
+        if (orders.visitorOrdersSince(since) >= VISITOR_DAILY_CAP) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+        String ref = "VISIT-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        return respond(service.place(new OrderService.PlaceOrder(ref, Channel.ONLINE, Origin.VISITOR, r.sku(), r.fc(), r.qty(), null)));
     }
 
     private static ResponseEntity<OrderView> respond(OrderService.PlaceResult result) {

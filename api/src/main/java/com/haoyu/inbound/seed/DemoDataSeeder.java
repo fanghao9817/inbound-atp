@@ -108,7 +108,7 @@ class DemoDataSeeder implements CommandLineRunner {
                 throw e;
             }
         }
-        var scored = recalculation.recalculateAllOpen();
+        var scored = recalculation.recalculateAllOpen(EtaRecalculationService.Reason.SEED);
         log.info("initial ETA scoring: {} open shipments, {} predictions set", scored.shipments(), scored.changed());
         var projected = projection.projectAll();
         log.info("initial storefront projection: {} rows", projected.items());
@@ -120,21 +120,22 @@ class DemoDataSeeder implements CommandLineRunner {
 
         Map<String, Long> fcIds = insertFcs(conn);
         Map<String, Long> skuIds = insertSkus(conn);
+        insertSourcing(conn);
         insertInventory(conn, rnd, skuIds, fcIds);
         insertDemand(conn, rnd, today, skuIds, fcIds);
 
         int poSeq = 1000;
-        // a year of history: fully received containers with all five milestones
-        for (int i = 0; i < 480; i++) {   // ~40 per lane, enough for HIGH confidence on late stages
+        OffsetDateTime seededAt = OffsetDateTime.now(clock);
+        // a year of history: fully received containers, every milestone before today (~40 per lane,
+        // enough for HIGH confidence on late stages)
+        for (int i = 0; i < 480; i++) {
             Lane lane = LANES.get(rnd.nextInt(LANES.size()));
-            LocalDate departed = today.minusDays(20 + rnd.nextInt(345));
-            insertPurchaseOrder(conn, rnd, lane, "PO-" + (poSeq++), departed, skuIds, fcIds, true, today);
+            insertPurchaseOrder(conn, rnd, lane, "PO-" + (poSeq++), skuIds, fcIds, true, today, seededAt);
         }
-        // the live book: open containers spread across stages, a few of them late
+        // the live book: open containers spread across stages, each with its next milestone still ahead
         for (int i = 0; i < 36; i++) {
             Lane lane = LANES.get(rnd.nextInt(LANES.size()));
-            LocalDate departed = today.minusDays(rnd.nextInt(40)).plusDays(rnd.nextInt(12));
-            insertPurchaseOrder(conn, rnd, lane, "PO-" + (poSeq++), departed, skuIds, fcIds, false, today);
+            insertPurchaseOrder(conn, rnd, lane, "PO-" + (poSeq++), skuIds, fcIds, false, today, seededAt);
         }
     }
 
@@ -165,6 +166,20 @@ class DemoDataSeeder implements CommandLineRunner {
         return ids;
     }
 
+    /** Where each SKU is bought: sofas from Vietnam, tables and bedroom from Malaysia, the rest from China. */
+    private void insertSourcing(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement()) {
+            st.executeUpdate("""
+                    insert into sku_source (sku_id, origin_port, supplier)
+                    select id,
+                           case when category = 'Sofas' then 'VNSGN' when category in ('Tables', 'Bedroom') then 'MYPKG' else 'CNSHA' end,
+                           case when category = 'Sofas' then 'Saigon Furniture Co.' when category in ('Tables', 'Bedroom') then 'Klang Valley Timber'
+                                else 'Shanghai Home Works' end
+                    from sku
+                    """);
+        }
+    }
+
     private void insertInventory(Connection conn, Random rnd, Map<String, Long> skuIds, Map<String, Long> fcIds) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "insert into inventory_position (sku_id, fc_id, on_hand, reserved) values (?, ?, ?, ?)")) {
@@ -186,41 +201,37 @@ class DemoDataSeeder implements CommandLineRunner {
                     select sku_id, fc_id, 'OPENING', on_hand, reserved, 'OPENING' from inventory_position
                     """);
             st.executeUpdate("""
-                    insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, reserved_at)
-                    select 'SEED-RES-' || sku_id || '-' || fc_id, 'ONLINE', sku_id, fc_id, reserved, 'RESERVED', current_date, now()
+                    insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, promise_date, first_promise_date, reserved_at)
+                    select 'SEED-RES-' || sku_id || '-' || fc_id, 'ONLINE', 'SEED', sku_id, fc_id, reserved, 'RESERVED', current_date, current_date, now()
                     from inventory_position where reserved > 0
                     """);
         }
     }
 
-    /** Open B2B and store orders promised against inbound stock: each is an order plus its commitment. */
+    /**
+     * Open B2B and store orders due one to eight weeks out: SCHEDULED (time-phased demand, nothing locked
+     * yet). The 06:00 commitment run reserves them when they come due, or re-promises them if supply slips.
+     */
     private void insertDemand(Connection conn, Random rnd, LocalDate today, Map<String, Long> skuIds, Map<String, Long> fcIds) throws SQLException {
         String[] refs = {"B2B", "TRADE", "PROMO", "STORE"};
         List<Long> skus = new ArrayList<>(skuIds.values());
         List<Long> fcs = new ArrayList<>(fcIds.values());
         try (PreparedStatement order = conn.prepareStatement("""
-                     insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, need_by)
-                     values (?, ?, ?, ?, ?, 'BACKORDERED', ?, ?)
-                     """, Statement.RETURN_GENERATED_KEYS);
-             PreparedStatement commitment = conn.prepareStatement(
-                     "insert into demand_commitment (sku_id, fc_id, qty, need_by, reference, order_id) values (?, ?, ?, ?, ?, ?)")) {
+                insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by)
+                values (?, ?, 'SEED', ?, ?, ?, 'SCHEDULED', ?, ?, ?)
+                """)) {
             for (int i = 0; i < 48; i++) {
-                long sku = skus.get(rnd.nextInt(skus.size()));
-                long fc = fcs.get(rnd.nextInt(fcs.size()));
-                int qty = 5 + rnd.nextInt(36);
-                LocalDate needBy = today.plusDays(3 + rnd.nextInt(45));
+                LocalDate needBy = today.plusDays(7 + rnd.nextInt(50));
                 String prefix = refs[rnd.nextInt(refs.length)];
-                String ref = prefix + "-" + (1000 + i);
-                order.setString(1, ref); order.setString(2, "STORE".equals(prefix) ? "STORE" : "B2B");
-                order.setLong(3, sku); order.setLong(4, fc); order.setInt(5, qty);
-                order.setObject(6, needBy); order.setObject(7, needBy);
-                order.executeUpdate();
-                long orderId = generatedId(order);
-                commitment.setLong(1, sku); commitment.setLong(2, fc); commitment.setInt(3, qty);
-                commitment.setObject(4, needBy); commitment.setString(5, ref); commitment.setLong(6, orderId);
-                commitment.addBatch();
+                order.setString(1, prefix + "-" + (1000 + i));
+                order.setString(2, "STORE".equals(prefix) ? "STORE" : "B2B");
+                order.setLong(3, skus.get(rnd.nextInt(skus.size())));
+                order.setLong(4, fcs.get(rnd.nextInt(fcs.size())));
+                order.setInt(5, 5 + rnd.nextInt(36));
+                order.setObject(6, needBy); order.setObject(7, needBy); order.setObject(8, needBy);
+                order.addBatch();
             }
-            commitment.executeBatch();
+            order.executeBatch();
         }
     }
 
@@ -229,8 +240,9 @@ class DemoDataSeeder implements CommandLineRunner {
      * transit with log-normal noise, plus an occasional port delay, so the history has a real
      * distribution for dbt to summarise.
      */
-    private void insertPurchaseOrder(Connection conn, Random rnd, Lane lane, String poNumber, LocalDate departed,
-                                     Map<String, Long> skuIds, Map<String, Long> fcIds, boolean history, LocalDate today) throws SQLException {
+    private void insertPurchaseOrder(Connection conn, Random rnd, Lane lane, String poNumber,
+                                     Map<String, Long> skuIds, Map<String, Long> fcIds, boolean history, LocalDate today,
+                                     OffsetDateTime seededAt) throws SQLException {
         double noise = Math.exp(rnd.nextGaussian() * 0.15);
         int transit = (int) Math.round(lane.medianDays() * noise);
         int bookedLead = 3 + rnd.nextInt(5);
@@ -239,6 +251,12 @@ class DemoDataSeeder implements CommandLineRunner {
         int toCustoms = toPort + 1 + rnd.nextInt(4);
         int toReceived = toCustoms + 2 + rnd.nextInt(5);
 
+        // History is received at least a day ago; an open container departed recently enough that it
+        // cannot have been received yet (some have not even departed). Transit is drawn first, so the
+        // departure can be chosen to make that true.
+        LocalDate departed = history
+                ? today.minusDays(toReceived + 1L + rnd.nextInt(330))
+                : today.minusDays(rnd.nextInt(Math.max(1, toReceived))).plusDays(rnd.nextInt(12));
         LocalDate booked = departed.minusDays(bookedLead);
         // carriers quote a conservative plan; only containers that are genuinely slow (port delays, bad weeks) end up late vs plan
         LocalDate plannedArrival = departed.plusDays((int) Math.round(lane.medianDays() * 0.78) + 11);
@@ -251,7 +269,7 @@ class DemoDataSeeder implements CommandLineRunner {
                 """, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, poNumber); ps.setString(2, supplier); ps.setString(3, lane.origin());
             ps.setLong(4, fcIds.get(lane.fc())); ps.setString(5, history ? "RECEIVED" : "OPEN");
-            ps.setObject(6, plannedArrival); ps.setObject(7, booked.minusDays(20).atStartOfDay().atOffset(ZoneOffset.UTC));
+            ps.setObject(6, plannedArrival); ps.setObject(7, booked.atStartOfDay(clock.getZone()).toOffsetDateTime());   // PO placed = booked
             ps.executeUpdate();
             poId = generatedId(ps);
         }
@@ -269,16 +287,15 @@ class DemoDataSeeder implements CommandLineRunner {
             ps.executeBatch();
         }
 
-        // which milestones have happened: all of them for history, up to "today" for open containers
+        // which milestones have happened: compare full timestamps with the seeding instant
         int[] offsets = {-bookedLead, 0, toPort, toCustoms, toReceived};
         MilestoneType[] types = MilestoneType.values();
-        int reached = history ? 5 : 0;
-        if (!history) {
-            for (int i = 0; i < 5; i++) {
-                if (!departed.plusDays(offsets[i]).isAfter(today)) reached = i + 1;
-            }
-            if (reached == 5) reached = 4;   // an open PO is by definition not received yet
+        OffsetDateTime[] at = new OffsetDateTime[5];
+        for (int i = 0; i < 5; i++) {
+            at[i] = departed.plusDays(offsets[i]).atTime(6 + rnd.nextInt(12), rnd.nextInt(60)).atZone(clock.getZone()).toOffsetDateTime();
         }
+        int reached = 0;
+        while (reached < 5 && !at[reached].isAfter(seededAt)) reached++;
         MilestoneType stage = reached == 0 ? MilestoneType.BOOKED : types[reached - 1];
 
         long shipmentId;
@@ -296,8 +313,7 @@ class DemoDataSeeder implements CommandLineRunner {
         try (PreparedStatement ps = conn.prepareStatement(
                 "insert into shipment_milestone (shipment_id, type, occurred_at, source, event_id) values (?, ?, ?, ?, ?)")) {
             for (int i = 0; i < reached; i++) {
-                OffsetDateTime at = departed.plusDays(offsets[i]).atTime(6 + rnd.nextInt(12), rnd.nextInt(60)).atOffset(ZoneOffset.UTC);
-                ps.setLong(1, shipmentId); ps.setString(2, types[i].name()); ps.setObject(3, at);
+                ps.setLong(1, shipmentId); ps.setString(2, types[i].name()); ps.setObject(3, at[i]);
                 ps.setString(4, i == 4 ? "WMS" : "CARRIER_EDI"); ps.setObject(5, UUID.randomUUID());
                 ps.addBatch();
             }

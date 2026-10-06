@@ -26,7 +26,7 @@ from ahead a where m.shipment_id = a.shipment_id;
 -- 2) Milestone hygiene: a fixed vocabulary of sources, and one container per PO (every supply query
 --    joins PO -> shipment and would double count otherwise)
 alter table shipment_milestone add constraint shipment_milestone_source_check
-    check (source in ('CARRIER_EDI', 'CUSTOMS_BROKER', 'WMS', 'BUYER', 'MANUAL'));
+    check (source in ('CARRIER_EDI', 'CARRIER_EDI_RECOVERY', 'CUSTOMS_BROKER', 'WMS', 'BUYER', 'MANUAL'));
 create unique index shipment_po_uq on shipment (po_id);
 create index shipment_milestone_recorded_idx on shipment_milestone (recorded_at);
 
@@ -46,6 +46,8 @@ create table customer_order (
     promise_date date,                                   -- current promise; moves later if inbound stock slips
     first_promise_date date,                             -- the date first promised, kept to measure slippage
     need_by      date,                                   -- requested date (B2B); null = as soon as possible
+    origin       text   not null default 'FEED'
+                 check (origin in ('FEED', 'VISITOR', 'SEED', 'MIGRATED')),  -- flow KPIs count FEED only
     created_at   timestamptz not null default now(),
     reserved_at  timestamptz,
     shipped_at   timestamptz,
@@ -57,18 +59,18 @@ create index customer_order_status_idx on customer_order (status, reserved_at);
 create index customer_order_created_idx on customer_order (created_at);
 create index customer_order_shipped_idx on customer_order (shipped_at) where shipped_at is not null;
 
-insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by, created_at)
+insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by, origin, created_at)
 select case when count(*) over (partition by dc.reference) > 1 then dc.reference || '-' || dc.id else dc.reference end,
        case when dc.reference like 'STORE-%' then 'STORE' else 'B2B' end,
        dc.sku_id, dc.fc_id, dc.qty,
        case when dc.need_by > current_date + 2 then 'SCHEDULED' else 'BACKORDERED' end,
-       dc.need_by, dc.need_by, dc.need_by, now()
+       dc.need_by, dc.need_by, dc.need_by, 'MIGRATED', now()
 from demand_commitment dc;
 
-insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, first_promise_date, created_at, reserved_at)
+insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, first_promise_date, origin, created_at, reserved_at)
 select 'LEGACY-RES-' || ip.sku_id || '-' || ip.fc_id, 'ONLINE', ip.sku_id, ip.fc_id, ip.reserved, 'RESERVED',
        (ip.updated_at at time zone 'America/Vancouver')::date, (ip.updated_at at time zone 'America/Vancouver')::date,
-       ip.updated_at, ip.updated_at
+       'MIGRATED', ip.updated_at, ip.updated_at
 from inventory_position ip
 where ip.reserved > 0;
 
@@ -103,6 +105,21 @@ from inventory_position;
 
 -- the conditional updates in the API keep this true; the constraint is defence in depth
 alter table inventory_position add constraint inventory_position_reserved_within_on_hand check (reserved <= on_hand);
+comment on column inventory_position.version is
+    'change counter (incremented on every movement); concurrency is handled by SELECT ... FOR UPDATE on the row, not optimistic locking';
+
+-- sourcing rule: where each SKU is bought (one supplier per SKU in this demo), used by replenishment
+create table sku_source (
+    sku_id      bigint primary key references sku (id),
+    origin_port text   not null,
+    supplier    text   not null
+);
+insert into sku_source (sku_id, origin_port, supplier)
+select id,
+       case when category = 'Sofas' then 'VNSGN' when category in ('Tables', 'Bedroom') then 'MYPKG' else 'CNSHA' end,
+       case when category = 'Sofas' then 'Saigon Furniture Co.' when category in ('Tables', 'Bedroom') then 'Klang Valley Timber'
+            else 'Shanghai Home Works' end
+from sku;
 
 -- 5) Goods receipts ------------------------------------------------------------------------------------
 -- RECEIVED_FC is the container at the dock (gate-in). Stock becomes sellable only when the warehouse
@@ -145,8 +162,7 @@ where predicted_arrival is not null;
 
 -- 7) Transactional outbox --------------------------------------------------------------------------------
 -- Events are inserted in the same transaction as the state change; OutboxRelay publishes them to Kafka
--- in id order. A crash between commit and send can no longer lose one. A row that keeps failing is
--- parked after 20 attempts so it cannot block everything behind it.
+-- in id order. A crash between commit and send can no longer lose one.
 create table outbox_event (
     id           bigserial primary key,
     topic        text not null,
@@ -155,10 +171,9 @@ create table outbox_event (
     created_at   timestamptz not null default now(),
     published_at timestamptz,
     attempts     int  not null default 0,
-    last_error   text,
-    parked_at    timestamptz
+    last_error   text
 );
-create index outbox_event_pending_idx on outbox_event (id) where published_at is null and parked_at is null;
+create index outbox_event_pending_idx on outbox_event (id) where published_at is null;
 
 -- 8) Operations notes (e.g. port congestion announced by the carrier feed); ref makes the POST idempotent
 create table ops_note (
