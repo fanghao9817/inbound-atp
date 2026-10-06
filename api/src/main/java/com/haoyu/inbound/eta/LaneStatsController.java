@@ -1,7 +1,7 @@
 package com.haoyu.inbound.eta;
 
-import com.haoyu.inbound.projection.AvailabilityProjectionService;
 import java.util.List;
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -10,14 +10,11 @@ import org.springframework.web.bind.annotation.RestController;
 class LaneStatsController {
 
     private final LaneStatsRepository laneStats;
-    private final EtaRecalculationService recalculation;
-    private final AvailabilityProjectionService projection;
+    private final RefreshService refresh;
 
-    LaneStatsController(LaneStatsRepository laneStats, EtaRecalculationService recalculation,
-                        AvailabilityProjectionService projection) {
+    LaneStatsController(LaneStatsRepository laneStats, RefreshService refresh) {
         this.laneStats = laneStats;
-        this.recalculation = recalculation;
-        this.projection = projection;
+        this.refresh = refresh;
     }
 
     /** What dbt computed; empty until the first `dbt run`. */
@@ -26,14 +23,16 @@ class LaneStatsController {
         return laneStats.listAll();
     }
 
-    /**
-     * Re-scores every open shipment against the current lane statistics. Run after a dbt refresh;
-     * milestones trigger recalculation on their own.
-     */
-    @PostMapping("/api/eta/recalculate-all")
-    EtaRecalculationService.RecalcSummary recalculateAll() {
-        var summary = recalculation.recalculateAllOpen();
-        projection.projectAll();
-        return summary;
+    /** When the last full refresh finished (daily at 00:05 and after each dbt run). */
+    @GetMapping("/api/refresh/last")
+    Map<String, Object> last() {
+        var s = refresh.last();
+        return s == null ? Map.of() : Map.of("finishedAt", s.finishedAt(), "rescored", s.rescored(), "projected", s.projected());
+    }
+
+    /** After a dbt refresh: re-score every open shipment against the new statistics, then re-project. */
+    @PostMapping("/api/internal/eta/recalculate-all")
+    RefreshService.Summary recalculateAll() {
+        return refresh.refresh(EtaRecalculationService.Reason.STATS_REFRESH);
     }
 }

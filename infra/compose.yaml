@@ -40,6 +40,7 @@ services:
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+      KAFKA_LOG_RETENTION_HOURS: 336          # two weeks of events to replay from
       CLUSTER_ID: "inbound-atp-kraft-000001"
     ports:
       - "127.0.0.1:29092:29092"

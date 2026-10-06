@@ -7,8 +7,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 class ClockConfig {
 
+    /** Every "today" in the API comes from this clock, in the business zone - never from the JVM or DB default. */
     @Bean
-    Clock clock() {
-        return Clock.systemDefaultZone();
+    Clock clock(AppProperties props) {
+        return Clock.system(props.businessZone());
     }
 }

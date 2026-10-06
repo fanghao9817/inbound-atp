@@ -3,7 +3,11 @@ package com.haoyu.inbound.projection;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
-/** One SKU x FC row of the storefront projection, as accepted by the projector Lambda. */
+/**
+ * One SKU x FC row of the storefront projection, as accepted by the projector Lambda.
+ * updatedAtMs (epoch millis) is what the Lambda compares to drop stale writes: comparing ISO strings
+ * with UTC offsets breaks for an hour after the DST fall-back. updatedAt is kept for display.
+ */
 public record AvailabilityItem(String sku, String fc, String fcName, int availableNow, LocalDate promiseDate,
                                boolean promisable, String confidence, LocalDate nextArrival, OffsetDateTime updatedAt,
-                               String source) {}
+                               long updatedAtMs, String source) {}

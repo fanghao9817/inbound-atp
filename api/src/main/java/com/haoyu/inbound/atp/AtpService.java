@@ -47,6 +47,23 @@ public class AtpService {
         this.clock = clock;
     }
 
+    /** The three ATP inputs for one position, as read inside whatever transaction the caller is in. */
+    public record Inputs(int availableNow, List<InboundSupply> inbound, List<DemandCommitment> commitments) {}
+
+    /**
+     * Reads the ATP inputs and computes the timeline in the CALLER's transaction - deliberately not
+     * {@code @Transactional}: order placement calls this while it holds the row lock on the position,
+     * so the decision is made on exactly the state it will change. {@code excludeOrderId} drops that
+     * order's own backorder commitment (used when checking whether a backorder can now be reserved).
+     */
+    public Inputs inputs(long skuId, FulfillmentCenter fc, LocalDate today, Long excludeOrderId) {
+        int horizon = props.atp().horizonDays();
+        int availableNow = inventory.findPosition(skuId, fc.id()).map(InventoryPosition::availableNow).orElse(0);
+        List<InboundSupply> inbound = purchaseOrders.openSupply(skuId, fc.id());
+        List<DemandCommitment> commitments = inventory.listOpenCommitments(skuId, fc.id(), today.plusDays(horizon), excludeOrderId);
+        return new Inputs(availableNow, inbound, commitments);
+    }
+
     /**
      * When inbound stock becomes sellable: arrival plus the FC's dock-to-stock days, and never before
      * tomorrow - a container that has not been put away is not in the building, however overdue it is.
@@ -55,6 +72,16 @@ public class AtpService {
     public static LocalDate sellableFrom(InboundSupply s, FulfillmentCenter fc, LocalDate today) {
         LocalDate planned = s.effectiveArrival().plusDays(fc.receivingBufferDays());
         return planned.isAfter(today) ? planned : today.plusDays(1);
+    }
+
+    public Result timeline(Inputs in, FulfillmentCenter fc, LocalDate today) {
+        List<Supply> supplies = in.inbound().stream()
+                .map(s -> new Supply(sellableFrom(s, fc, today), s.qtyOutstanding(), s.poNumber()))
+                .toList();
+        List<Demand> demands = in.commitments().stream()
+                .map(d -> new Demand(d.needBy(), d.qty(), d.reference()))
+                .toList();
+        return AtpCalculator.compute(today, in.availableNow(), supplies, demands, props.atp().horizonDays());
     }
 
     /**
@@ -68,25 +95,16 @@ public class AtpService {
         Sku sku = catalog.requireSku(skuCode);
         FulfillmentCenter fc = catalog.requireFc(fcCode);
         LocalDate today = LocalDate.now(clock);
-        int horizon = props.atp().horizonDays();
 
-        int availableNow = inventory.findPosition(sku.id(), fc.id()).map(InventoryPosition::availableNow).orElse(0);
-        List<InboundSupply> inbound = purchaseOrders.openSupply(sku.id(), fc.id());
-        List<DemandCommitment> commitments = inventory.listOpenCommitments(sku.id(), fc.id(), today.plusDays(horizon));
-
-        List<Supply> supplies = inbound.stream()
-                .map(s -> new Supply(sellableFrom(s, fc, today), s.qtyOutstanding(), s.poNumber()))
-                .toList();
-        List<Demand> demands = commitments.stream()
-                .map(d -> new Demand(d.needBy(), d.qty(), d.reference()))
-                .toList();
-        Result result = AtpCalculator.compute(today, availableNow, supplies, demands, horizon);
+        Inputs in = inputs(sku.id(), fc, today, null);
+        Result result = timeline(in, fc, today);
         LocalDate promise = result.earliestDateFor(qty).orElse(null);
 
-        return new AtpQuote(sku.code(), fc.code(), qty, availableNow, promise, promise != null, horizon, result.timeline(),
-                inbound.stream().map(s -> new SupplyLine(s.poNumber(), s.qtyOutstanding(),
+        return new AtpQuote(sku.code(), fc.code(), qty, in.availableNow(), promise, promise != null, props.atp().horizonDays(),
+                result.timeline(),
+                in.inbound().stream().map(s -> new SupplyLine(s.poNumber(), s.qtyOutstanding(),
                         sellableFrom(s, fc, today), s.currentStage().name(), s.predictedConfidence())).toList(),
-                commitments.stream().map(d -> new DemandLine(d.reference(), d.qty(), d.needBy())).toList());
+                in.commitments().stream().map(d -> new DemandLine(d.reference(), d.qty(), d.needBy())).toList());
     }
 
     /** One line per FC so a storefront can pick where to promise from. */

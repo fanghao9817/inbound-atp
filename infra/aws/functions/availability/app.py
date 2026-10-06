@@ -22,7 +22,7 @@ def _plain(v):
 def _response(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Cache-Control": "public, max-age=15"},
+        "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
         "body": json.dumps(body),
     }
 

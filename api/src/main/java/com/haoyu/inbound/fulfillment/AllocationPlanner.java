@@ -15,6 +15,11 @@ public final class AllocationPlanner {
 
     public static FulfillmentResponse plan(String sku, String fc, int requested, int inventoryAvailable,
                                            List<InboundLine> inbound, LocalDate today) {
+        return plan(sku, fc, requested, inventoryAvailable, inbound, today, 0);
+    }
+
+    public static FulfillmentResponse plan(String sku, String fc, int requested, int inventoryAvailable,
+                                           List<InboundLine> inbound, LocalDate today, int committedToOtherOrders) {
         int fromInventory = Math.min(Math.max(inventoryAvailable, 0), requested);
         int gap = requested - fromInventory;
         LocalDate fulfilledBy = today;
@@ -30,6 +35,6 @@ public final class AllocationPlanner {
         }
         boolean fully = gap == 0;
         return new FulfillmentResponse(sku, fc, requested, requested - gap, gap, fromInventory,
-                List.copyOf(allocations), fully, fully ? fulfilledBy : null);
+                List.copyOf(allocations), fully, fully ? fulfilledBy : null, committedToOtherOrders);
     }
 }

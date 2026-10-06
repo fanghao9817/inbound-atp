@@ -41,6 +41,22 @@ public class CatalogRepository {
         return findFcByCode(code).orElseThrow(() -> new NotFoundException("fulfillment center", code));
     }
 
+    public FulfillmentCenter requireFc(long id) {
+        return jdbc.sql("select id, code, name, region, receiving_buffer_days from fulfillment_center where id = :id")
+                .param("id", id)
+                .query(FulfillmentCenter.class)
+                .optional()
+                .orElseThrow(() -> new NotFoundException("fulfillment center", id));
+    }
+
+    public Sku requireSku(long id) {
+        return jdbc.sql("select id, code, name, category from sku where id = :id")
+                .param("id", id)
+                .query(Sku.class)
+                .optional()
+                .orElseThrow(() -> new NotFoundException("sku", id));
+    }
+
     public List<FulfillmentCenter> listFcs() {
         return jdbc.sql("select id, code, name, region, receiving_buffer_days from fulfillment_center order by code")
                 .query(FulfillmentCenter.class)

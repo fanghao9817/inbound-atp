@@ -8,7 +8,6 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -48,27 +47,55 @@ public class ShipmentRepository {
     }
 
     /**
-     * Records a milestone exactly once per event id. Returns false when the event was already
-     * recorded (replayed EDI message, at-least-once delivery) so callers can skip side effects.
+     * Inserts the milestone unless this event id or this (shipment, stage) is already recorded; a single
+     * "on conflict do nothing" without a target covers both unique constraints, so there is no
+     * check-then-insert race. Returns false when nothing was inserted.
      */
     public boolean insertMilestoneIfNew(long shipmentId, MilestoneType type, OffsetDateTime occurredAt,
                                         String source, UUID eventId) {
-        try {
-            int rows = jdbc.sql("""
-                    insert into shipment_milestone (shipment_id, type, occurred_at, source, event_id)
-                    values (:shipment, :type, :occurredAt, :source, :eventId)
-                    on conflict (shipment_id, type) do nothing
-                    """)
-                    .param("shipment", shipmentId)
-                    .param("type", type.name())
-                    .param("occurredAt", occurredAt)
-                    .param("source", source)
-                    .param("eventId", eventId)
-                    .update();
-            return rows == 1;
-        } catch (DuplicateKeyException sameEventId) {
-            return false;
-        }
+        int rows = jdbc.sql("""
+                insert into shipment_milestone (shipment_id, type, occurred_at, source, event_id)
+                values (:shipment, :type, :occurredAt, :source, :eventId)
+                on conflict do nothing
+                """)
+                .param("shipment", shipmentId)
+                .param("type", type.name())
+                .param("occurredAt", occurredAt)
+                .param("source", source)
+                .param("eventId", eventId)
+                .update();
+        return rows == 1;
+    }
+
+    /** The milestone that blocked an insert: same event id, or same stage of the same shipment. */
+    public Optional<ShipmentMilestone> findMilestone(long shipmentId, MilestoneType type, UUID eventId) {
+        return jdbc.sql("""
+                select id, shipment_id, type, occurred_at, source, event_id, recorded_at
+                from shipment_milestone
+                where event_id = :eventId or (shipment_id = :shipment and type = :type)
+                order by (event_id = :eventId) desc
+                limit 1
+                """)
+                .param("eventId", eventId).param("shipment", shipmentId).param("type", type.name())
+                .query(this::mapMilestone)
+                .optional();
+    }
+
+    /** When the latest earlier stage happened; a later stage cannot have happened before it. */
+    public Optional<OffsetDateTime> latestEarlierMilestone(long shipmentId, MilestoneType type) {
+        return jdbc.sql("""
+                select max(occurred_at) from shipment_milestone
+                where shipment_id = :shipment and type = any(:earlier)
+                """)
+                .param("shipment", shipmentId)
+                .param("earlier", java.util.Arrays.stream(MilestoneType.values()).filter(t -> type.isAfter(t)).map(Enum::name).toArray(String[]::new))
+                .query(OffsetDateTime.class)
+                .list().stream().filter(java.util.Objects::nonNull).findFirst();    // max() over no rows is one NULL row
+    }
+
+    public boolean isPurchaseOrderOpen(long shipmentId) {
+        return jdbc.sql("select po.status = 'OPEN' from shipment s join purchase_order po on po.id = s.po_id where s.id = :id")
+                .param("id", shipmentId).query(Boolean.class).single();
     }
 
     /** Moves the stage forward only; milestones can arrive out of order and must not regress it. */
@@ -76,12 +103,11 @@ public class ShipmentRepository {
         jdbc.sql("""
                 update shipment
                 set current_stage = :stage, updated_at = now(), version = version + 1
-                where id = :id
-                  and array_position(array['BOOKED','DEPARTED_ORIGIN','ARRIVED_DEST_PORT','CUSTOMS_CLEARED','RECEIVED_FC'], current_stage)
-                    < array_position(array['BOOKED','DEPARTED_ORIGIN','ARRIVED_DEST_PORT','CUSTOMS_CLEARED','RECEIVED_FC'], :stage)
+                where id = :id and current_stage = any(:earlier)
                 """)
                 .param("id", shipmentId)
                 .param("stage", stage.name())
+                .param("earlier", java.util.Arrays.stream(MilestoneType.values()).filter(stage::isAfter).map(Enum::name).toArray(String[]::new))
                 .update();
     }
 
@@ -101,6 +127,15 @@ public class ShipmentRepository {
                 .param("basis", basis)
                 .update();
         return rows == 1;
+    }
+
+    public List<String> skusOnShipment(long shipmentId) {
+        return jdbc.sql("""
+                select sku.code from shipment s
+                join purchase_order_line l on l.po_id = s.po_id
+                join sku on sku.id = l.sku_id
+                where s.id = :id order by sku.code
+                """).param("id", shipmentId).query(String.class).list();
     }
 
     public record LaneOf(String originPort, String destFcCode, int receivingBufferDays) {}

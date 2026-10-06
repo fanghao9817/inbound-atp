@@ -27,6 +27,6 @@ public class FulfillmentService {
         LocalDate today = LocalDate.now(clock);
         FulfillmentJdbcDao.Snapshot snapshot = dao.snapshot(request.sku(), request.fc(), today);
         return AllocationPlanner.plan(request.sku(), request.fc(), request.requestedQuantity(),
-                snapshot.inventoryAvailable(), snapshot.inbound(), today);
+                snapshot.inventoryAvailable(), snapshot.inbound(), today, snapshot.committedToOtherOrders());
     }
 }

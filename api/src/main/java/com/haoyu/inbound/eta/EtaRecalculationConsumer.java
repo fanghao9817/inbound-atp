@@ -23,8 +23,7 @@ class EtaRecalculationConsumer {
     @KafkaListener(topics = "${app.topics.milestones}", groupId = "${spring.kafka.consumer.group-id}")
     void onMilestone(String payload) {
         ShipmentMilestoneEvent event = json.readValue(payload, ShipmentMilestoneEvent.class);
-        var prediction = service.recalculate(event.shipmentId());
-        log.info("shipment {} {} -> predicted {} ({})", event.shipmentId(), event.type(),
-                prediction.arrival(), prediction.confidence());
+        boolean changed = service.recalculate(event.shipmentId(), EtaRecalculationService.Reason.MILESTONE);
+        log.info("shipment {} {} -> prediction {}", event.shipmentId(), event.type(), changed ? "changed" : "unchanged");
     }
 }

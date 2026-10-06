@@ -52,7 +52,17 @@ public class FulfillmentJdbcDao {
             order by expected_at asc, po.id asc
             """;
 
-    public record Snapshot(int inventoryAvailable, List<InboundLine> inbound) {}
+    /** Units already promised to other orders (SCHEDULED / BACKORDERED): the naive plan does not net them. */
+    private static final String COMMITTED_SQL = """
+            select coalesce(sum(dc.qty), 0) as committed
+            from demand_commitment dc
+            join sku on sku.id = dc.sku_id
+            join fulfillment_center fc on fc.id = dc.fc_id
+            where sku.code = ?
+              and (? is null or fc.code = ?)
+            """;
+
+    public record Snapshot(int inventoryAvailable, List<InboundLine> inbound, int committedToOtherOrders) {}
 
     private final DataSource dataSource;
 
@@ -69,8 +79,9 @@ public class FulfillmentJdbcDao {
             try {
                 int available = readAvailable(conn, skuCode, fcCode);
                 List<InboundLine> inbound = readInbound(conn, skuCode, fcCode, today);
+                int committed = readCommitted(conn, skuCode, fcCode);
                 conn.commit();
-                return new Snapshot(available, inbound);
+                return new Snapshot(available, inbound, committed);
             } catch (SQLException | RuntimeException e) {
                 conn.rollback();
                 throw e;
@@ -116,6 +127,17 @@ public class FulfillmentJdbcDao {
             }
         }
         return lines;
+    }
+
+    private static int readCommitted(Connection conn, String skuCode, String fcCode) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(COMMITTED_SQL)) {
+            stmt.setString(1, skuCode);
+            setNullableString(stmt, 2, fcCode);
+            setNullableString(stmt, 3, fcCode);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt("committed") : 0;
+            }
+        }
     }
 
     /** A typed NULL: PostgreSQL cannot infer the type of a bare {@code ? is null} parameter. */

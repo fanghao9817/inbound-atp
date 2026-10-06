@@ -17,8 +17,8 @@ class ProjectionController {
         this.props = props;
     }
 
-    /** Re-projects every SKU x FC; run after a reseed or a dbt refresh. */
-    @PostMapping("/api/availability/project-all")
+    /** Re-projects every SKU x FC (also part of the daily refresh). */
+    @PostMapping("/api/internal/availability/project-all")
     AvailabilityProjectionService.Summary projectAll() {
         return projection.projectAll();
     }

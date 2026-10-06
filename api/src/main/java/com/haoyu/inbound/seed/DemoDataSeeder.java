@@ -178,23 +178,49 @@ class DemoDataSeeder implements CommandLineRunner {
             }
             ps.executeBatch();
         }
+        try (Statement st = conn.createStatement()) {
+            // the same shape V2 migrates existing data into: an opening ledger row per position, and
+            // every reserved unit belongs to an order waiting to be picked
+            st.executeUpdate("""
+                    insert into inventory_movement (sku_id, fc_id, kind, on_hand_delta, reserved_delta, ref_type)
+                    select sku_id, fc_id, 'OPENING', on_hand, reserved, 'OPENING' from inventory_position
+                    """);
+            st.executeUpdate("""
+                    insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, reserved_at)
+                    select 'SEED-RES-' || sku_id || '-' || fc_id, 'ONLINE', sku_id, fc_id, reserved, 'RESERVED', current_date, now()
+                    from inventory_position where reserved > 0
+                    """);
+        }
     }
 
+    /** Open B2B and store orders promised against inbound stock: each is an order plus its commitment. */
     private void insertDemand(Connection conn, Random rnd, LocalDate today, Map<String, Long> skuIds, Map<String, Long> fcIds) throws SQLException {
         String[] refs = {"B2B", "TRADE", "PROMO", "STORE"};
         List<Long> skus = new ArrayList<>(skuIds.values());
         List<Long> fcs = new ArrayList<>(fcIds.values());
-        try (PreparedStatement ps = conn.prepareStatement(
-                "insert into demand_commitment (sku_id, fc_id, qty, need_by, reference) values (?, ?, ?, ?, ?)")) {
+        try (PreparedStatement order = conn.prepareStatement("""
+                     insert into customer_order (order_ref, channel, sku_id, fc_id, qty, status, promise_date, need_by)
+                     values (?, ?, ?, ?, ?, 'BACKORDERED', ?, ?)
+                     """, Statement.RETURN_GENERATED_KEYS);
+             PreparedStatement commitment = conn.prepareStatement(
+                     "insert into demand_commitment (sku_id, fc_id, qty, need_by, reference, order_id) values (?, ?, ?, ?, ?, ?)")) {
             for (int i = 0; i < 48; i++) {
-                ps.setLong(1, skus.get(rnd.nextInt(skus.size())));
-                ps.setLong(2, fcs.get(rnd.nextInt(fcs.size())));
-                ps.setInt(3, 5 + rnd.nextInt(36));
-                ps.setObject(4, today.plusDays(3 + rnd.nextInt(45)));
-                ps.setString(5, refs[rnd.nextInt(refs.length)] + "-" + (1000 + i));
-                ps.addBatch();
+                long sku = skus.get(rnd.nextInt(skus.size()));
+                long fc = fcs.get(rnd.nextInt(fcs.size()));
+                int qty = 5 + rnd.nextInt(36);
+                LocalDate needBy = today.plusDays(3 + rnd.nextInt(45));
+                String prefix = refs[rnd.nextInt(refs.length)];
+                String ref = prefix + "-" + (1000 + i);
+                order.setString(1, ref); order.setString(2, "STORE".equals(prefix) ? "STORE" : "B2B");
+                order.setLong(3, sku); order.setLong(4, fc); order.setInt(5, qty);
+                order.setObject(6, needBy); order.setObject(7, needBy);
+                order.executeUpdate();
+                long orderId = generatedId(order);
+                commitment.setLong(1, sku); commitment.setLong(2, fc); commitment.setInt(3, qty);
+                commitment.setObject(4, needBy); commitment.setString(5, ref); commitment.setLong(6, orderId);
+                commitment.addBatch();
             }
-            ps.executeBatch();
+            commitment.executeBatch();
         }
     }
 

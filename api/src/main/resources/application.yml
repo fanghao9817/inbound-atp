@@ -9,6 +9,10 @@ spring:
       maximum-pool-size: 8
   flyway:
     schemas: public,analytics
+  task:
+    scheduling:
+      pool:
+        size: 4                                       # outbox relay, daily jobs and purges must not wait on each other
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
     consumer:
@@ -20,6 +24,11 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
+      properties:
+        # give up quickly when Kafka is down, so the outbox relay backs off instead of hanging
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
   jackson:
     default-property-inclusion: non_null
 
@@ -27,6 +36,14 @@ app:
   topics:
     milestones: shipment.milestones
     eta-updated: shipment.eta-updated
+    availability-changed: availability.changed
+  orders:
+    allocation-window-days: 2
+    public-max-qty: 5
+  business-zone: America/Vancouver
+  internal-token: ${INTERNAL_API_TOKEN:}             # empty = internal endpoints only answer loopback callers
+  outbox:
+    poll-ms: 500
   seed:
     enabled: ${SEED_ENABLED:true}
   atp:

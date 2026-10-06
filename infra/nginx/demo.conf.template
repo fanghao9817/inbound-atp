@@ -1,5 +1,17 @@
 # Rendered by scripts/render-nginx.sh into /etc/nginx/sites-available/demo.
 # The trailing placeholder becomes the 443 server block when a Let's Encrypt cert exists for the domain.
+
+# Writes are rate-limited per client IP; reads are not (an empty key means "not limited").
+map $request_method $inbound_write_key {
+    default "";
+    POST    $binary_remote_addr;
+    PUT     $binary_remote_addr;
+    PATCH   $binary_remote_addr;
+    DELETE  $binary_remote_addr;
+}
+limit_req_zone $inbound_write_key zone=inbound_write:1m rate=20r/m;
+limit_req_zone $inbound_write_key zone=inbound_admin:1m rate=2r/m;
+
 server {
     listen 80 default_server;
     listen [::]:80 default_server;

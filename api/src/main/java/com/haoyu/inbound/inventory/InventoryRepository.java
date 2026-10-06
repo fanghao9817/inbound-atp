@@ -23,25 +23,30 @@ public class InventoryRepository {
                 .optional();
     }
 
-    public List<InventoryPosition> listPositions(long skuId) {
-        return jdbc.sql("select sku_id, fc_id, on_hand, reserved from inventory_position where sku_id = :sku order by fc_id")
-                .param("sku", skuId)
-                .query(InventoryPosition.class)
-                .list();
-    }
-
-    /** Commitments not yet fulfilled; past-due ones are still demand, so no lower bound on need_by. */
-    public List<DemandCommitment> listOpenCommitments(long skuId, long fcId, LocalDate horizon) {
+    /**
+     * Open commitments (SCHEDULED and BACKORDERED orders, via the demand_commitment view); past-due ones
+     * are still demand, so no lower bound on need_by.
+     * {@code excludeOrderId} leaves one order's own commitment out - used when deciding whether that
+     * backorder can now be served from stock.
+     */
+    public List<DemandCommitment> listOpenCommitments(long skuId, long fcId, LocalDate horizon, Long excludeOrderId) {
         return jdbc.sql("""
-                select id, sku_id, fc_id, qty, need_by, reference
+                select id, sku_id, fc_id, qty, need_by, reference, order_id
                 from demand_commitment
                 where sku_id = :sku and fc_id = :fc and need_by <= :horizon
+                  and (cast(:exclude as bigint) is null or order_id is distinct from cast(:exclude as bigint))
                 order by need_by, id
                 """)
                 .param("sku", skuId)
                 .param("fc", fcId)
                 .param("horizon", horizon)
+                .param("exclude", excludeOrderId, java.sql.Types.BIGINT)
                 .query(DemandCommitment.class)
                 .list();
     }
+
+    public List<DemandCommitment> listOpenCommitments(long skuId, long fcId, LocalDate horizon) {
+        return listOpenCommitments(skuId, fcId, horizon, null);
+    }
+
 }
