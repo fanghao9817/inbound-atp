@@ -76,7 +76,7 @@ public class EtaRecalculationService {
         Optional<LaneStats> stats = latest.flatMap(m ->
                 laneStats.find(lane.originPort(), lane.destFcCode(), m.type(), MilestoneType.RECEIVED_FC));
         String laneLabel = lane.originPort() + "→" + lane.destFcCode();
-        Prediction p = EtaPredictor.predict(shipment, latest, stats, laneLabel, LocalDate.now(clock));
+        Prediction p = EtaPredictor.predict(shipment, latest, stats, laneLabel, LocalDate.now(clock), clock.getZone());
 
         boolean changed = !Objects.equals(p.arrival(), shipment.predictedArrival())
                 || !Objects.equals(p.confidence().name(), shipment.predictedConfidence());

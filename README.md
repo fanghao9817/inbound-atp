@@ -5,6 +5,8 @@ suppliers into several North-American fulfillment centers.
 
 Live demo: https://demo.haoyufang.dev/ · API: `https://demo.haoyufang.dev/api/...` · health: `/health`
 
+> **All data is synthetic** — invented SKUs, suppliers, carriers, ports and customers. It is not Article data.
+
 The question it answers is the one every storefront and every planner asks: *"If a customer wants 5 of this
 sofa in Calgary, when can we honestly promise it?"* — counting stock on hand, the containers that are still on
 the water (at the date we *predict* they land, not the date the carrier promised), and the demand that is already
@@ -57,11 +59,11 @@ Design decisions worth asking about:
   written against `java.sql` so it is obvious which statements run and in which transaction (both reads share one
   repeatable-read snapshot, so a receipt landing between them cannot be counted twice).
 - **ATP takes the look-ahead minimum.** Stock that looks free on day 10 may be spoken for by a commitment due on
-  day 20; the naive projection over-promises. `AtpCalculator` is a pure function with exhaustive unit tests.
+  day 20; the naive projection over-promises. `AtpCalculator` is a pure function with table-driven unit tests.
 - **Promise on P80, not on the mean.** Under-promise and over-deliver; confidence grows with sample size and with
   how far along the container is. When a lane has no history the prediction falls back to the carrier plan and
   says so (`prediction_basis`).
-- **Recalculation is idempotent by construction.** The consumer recomputes from database state, never from the
+- **Recalculation converges.** The consumer recomputes from database state, never from the
   event payload, so replays and out-of-order milestones converge. Milestones carry an `event_id` and the same
   message is a no-op the second time (`insertMilestoneIfNew`). Stage transitions only move forward.
 - **Events are published after commit.** A consumer can never see an event whose row was rolled back. A full
@@ -126,6 +128,17 @@ The seed is deterministic (`Random(42)`), relative to today's date.
 | MySQL / PostgreSQL | PostgreSQL 16 in production; the fulfillment read path is ANSI SQL and runs unchanged on MySQL |
 | CI/CD, automated tests, monitoring | GitHub Actions `ci` + `deploy`; 19 JVM tests incl. Testcontainers end-to-end; dbt tests; Actuator health/metrics |
 | eCommerce / high-traffic customer-facing | The storefront read path is the DynamoDB projection, isolated from the operational database |
+
+## Status and known limitations
+
+- Predictions move when a milestone arrives and are re-scored for every open container every night at 00:05
+  (Vancouver), so an overdue container drops to LOW confidence instead of keeping a stale date.
+- Inbound stock is never promised before tomorrow plus the FC's dock-to-stock days, however overdue it is.
+- Events are published after commit (a transactional outbox is the next step); consumers recompute from the
+  database, so a duplicate or replayed event is harmless.
+- A RECEIVED_FC milestone does not post stock yet: goods receipts, orders and reservations are the next step.
+- Cost model: the Lightsail box ($44/month) is almost everything; DynamoDB, Lambda and CloudFormation stay
+  inside the AWS always-free tier, Databricks runs on the Free Edition.
 
 ## Roadmap (next)
 

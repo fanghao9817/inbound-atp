@@ -16,6 +16,9 @@ import { RouterLink, RouterView } from 'vue-router'
       <RouterLink to="/lanes">Lanes</RouterLink>
     </nav>
   </header>
+  <div class="synthetic-banner" role="note">
+    Synthetic demo data: simulated suppliers, carriers, warehouse and customers. Not Article data.
+  </div>
   <main class="page">
     <RouterView />
   </main>

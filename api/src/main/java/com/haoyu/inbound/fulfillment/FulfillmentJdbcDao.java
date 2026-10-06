@@ -60,7 +60,7 @@ public class FulfillmentJdbcDao {
         this.dataSource = dataSource;
     }
 
-    public Snapshot snapshot(String skuCode, String fcCode) {
+    public Snapshot snapshot(String skuCode, String fcCode, LocalDate today) {
         try (Connection conn = dataSource.getConnection()) {
             boolean previousAutoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
@@ -68,7 +68,7 @@ public class FulfillmentJdbcDao {
             conn.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
             try {
                 int available = readAvailable(conn, skuCode, fcCode);
-                List<InboundLine> inbound = readInbound(conn, skuCode, fcCode);
+                List<InboundLine> inbound = readInbound(conn, skuCode, fcCode, today);
                 conn.commit();
                 return new Snapshot(available, inbound);
             } catch (SQLException | RuntimeException e) {
@@ -94,7 +94,7 @@ public class FulfillmentJdbcDao {
         }
     }
 
-    private static List<InboundLine> readInbound(Connection conn, String skuCode, String fcCode) throws SQLException {
+    private static List<InboundLine> readInbound(Connection conn, String skuCode, String fcCode, LocalDate today) throws SQLException {
         List<InboundLine> lines = new ArrayList<>();
         try (PreparedStatement stmt = conn.prepareStatement(INBOUND_SQL)) {
             stmt.setString(1, skuCode);
@@ -102,9 +102,10 @@ public class FulfillmentJdbcDao {
             setNullableString(stmt, 3, fcCode);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    // "expected" means available to ship: arrival at the FC plus its dock-to-stock time,
-                    // the same date the ATP path uses, so the two quotes never disagree about a PO
-                    LocalDate expected = rs.getObject("expected_at", LocalDate.class).plusDays(rs.getInt("receiving_buffer_days"));
+                    // "expected" means sellable: arrival plus the FC's dock-to-stock days, and never before
+                    // tomorrow - the same rule as AtpService.sellableFrom, so the two quotes never disagree
+                    LocalDate sellable = rs.getObject("expected_at", LocalDate.class).plusDays(rs.getInt("receiving_buffer_days"));
+                    LocalDate expected = sellable.isAfter(today) ? sellable : today.plusDays(1);
                     lines.add(new InboundLine(
                             rs.getLong("id"),
                             rs.getString("po_number"),

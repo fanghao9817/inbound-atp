@@ -48,6 +48,16 @@ public class AtpService {
     }
 
     /**
+     * When inbound stock becomes sellable: arrival plus the FC's dock-to-stock days, and never before
+     * tomorrow - a container that has not been put away is not in the building, however overdue it is.
+     * (Past-due DEMAND, by contrast, rightly counts as due today; AtpCalculator folds it onto today.)
+     */
+    public static LocalDate sellableFrom(InboundSupply s, FulfillmentCenter fc, LocalDate today) {
+        LocalDate planned = s.effectiveArrival().plusDays(fc.receivingBufferDays());
+        return planned.isAfter(today) ? planned : today.plusDays(1);
+    }
+
+    /**
      * Full explanation for one SKU at one FC: the timeline and every supply/demand line behind it.
      * REPEATABLE_READ so the inventory, inbound and demand queries all see one snapshot - the same
      * guarantee the plain-JDBC fulfillment path sets by hand.
@@ -65,7 +75,7 @@ public class AtpService {
         List<DemandCommitment> commitments = inventory.listOpenCommitments(sku.id(), fc.id(), today.plusDays(horizon));
 
         List<Supply> supplies = inbound.stream()
-                .map(s -> new Supply(s.effectiveArrival().plusDays(fc.receivingBufferDays()), s.qtyOutstanding(), s.poNumber()))
+                .map(s -> new Supply(sellableFrom(s, fc, today), s.qtyOutstanding(), s.poNumber()))
                 .toList();
         List<Demand> demands = commitments.stream()
                 .map(d -> new Demand(d.needBy(), d.qty(), d.reference()))
@@ -75,7 +85,7 @@ public class AtpService {
 
         return new AtpQuote(sku.code(), fc.code(), qty, availableNow, promise, promise != null, horizon, result.timeline(),
                 inbound.stream().map(s -> new SupplyLine(s.poNumber(), s.qtyOutstanding(),
-                        s.effectiveArrival().plusDays(fc.receivingBufferDays()), s.currentStage().name(), s.predictedConfidence())).toList(),
+                        sellableFrom(s, fc, today), s.currentStage().name(), s.predictedConfidence())).toList(),
                 commitments.stream().map(d -> new DemandLine(d.reference(), d.qty(), d.needBy())).toList());
     }
 

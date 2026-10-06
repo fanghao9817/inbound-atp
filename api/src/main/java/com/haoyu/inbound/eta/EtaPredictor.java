@@ -4,6 +4,7 @@ import com.haoyu.inbound.procurement.MilestoneType;
 import com.haoyu.inbound.procurement.Shipment;
 import com.haoyu.inbound.procurement.ShipmentMilestone;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Optional;
 
 /**
@@ -18,17 +19,26 @@ public final class EtaPredictor {
 
     public enum Confidence { LOW, MEDIUM, HIGH }
 
-    public record Prediction(LocalDate arrival, Confidence confidence, String basis) {}
+    /**
+     * @param appliedDays whole days added to the milestone date (null when falling back to the carrier plan)
+     * @param sampleN     lane history behind the estimate (null when there is none)
+     */
+    public record Prediction(LocalDate arrival, Confidence confidence, String basis, Integer appliedDays, Integer sampleN) {
+
+        Prediction(LocalDate arrival, Confidence confidence, String basis) {
+            this(arrival, confidence, basis, null, null);
+        }
+    }
 
     private EtaPredictor() {}
 
     public static Prediction predict(Shipment shipment, Optional<ShipmentMilestone> latest,
-                                     Optional<LaneStats> stats, String lane, LocalDate today) {
+                                     Optional<LaneStats> stats, String lane, LocalDate today, ZoneId zone) {
         if (latest.isEmpty()) {
             return fallback(shipment, today, "No milestone received yet");
         }
         ShipmentMilestone m = latest.get();
-        LocalDate milestoneDate = m.occurredAt().toLocalDate();
+        LocalDate milestoneDate = m.occurredAt().atZoneSameInstant(zone).toLocalDate();   // the business day it happened
         if (m.type() == MilestoneType.RECEIVED_FC) {
             return new Prediction(milestoneDate, Confidence.HIGH, "Received at fulfillment center");
         }
@@ -39,14 +49,19 @@ public final class EtaPredictor {
         long p80 = (long) Math.ceil(s.p80Days().doubleValue());
         LocalDate arrival = milestoneDate.plusDays(p80);
         if (arrival.isBefore(today)) {
-            // history says it should already be here; it is late, promise no earlier than tomorrow
-            arrival = today.plusDays(1);
+            // Overdue: 80% of containers on this lane were in by now. We know only that it is late, so
+            // re-estimate from today with the lane's own spread (P80 - P50) and say so with LOW confidence.
+            long spread = Math.max(1, (long) Math.ceil(s.p80Days().doubleValue() - s.p50Days().doubleValue()));
+            LocalDate reestimate = today.plusDays(spread);
+            String basis = String.format("Overdue: P80 of %d shipments %s from %s put it in by %s; re-estimated today + %d d (P80 − P50 spread)",
+                    s.sampleN(), lane, m.type(), arrival, spread);
+            return new Prediction(reestimate, Confidence.LOW, basis, (int) spread, s.sampleN());
         }
         Confidence confidence = confidence(s.sampleN(), m.type());
         // show the whole days actually added: %.1f would print 28.04 as "28.0" while ceil() adds 29
         String basis = String.format("P80 of %d shipments %s from %s: %.2f d → +%d d (P50 %.1f d), milestone on %s",
                 s.sampleN(), lane, m.type(), s.p80Days(), p80, s.p50Days(), milestoneDate);
-        return new Prediction(arrival, confidence, basis);
+        return new Prediction(arrival, confidence, basis, (int) p80, s.sampleN());
     }
 
     private static Prediction fallback(Shipment shipment, LocalDate today, String why) {

@@ -77,7 +77,9 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' && echo -e 'GET /actuator/health/readiness HTTP/1.0\r\n' >&3 && grep -q UP <&3"]
+      # the previous check opened fd 3 in a child shell and wrote to it from the outer one, so the
+      # request never reached the API and the container showed "unhealthy" for weeks
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -88,7 +90,7 @@ services:
   # Kafka browser for humans. Bound to localhost only: reach it through an SSH tunnel
   # (ssh -L 8081:127.0.0.1:8081), never through the public firewall.
   kafka-ui:
-    image: ghcr.io/kafbat/kafka-ui:latest
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
     container_name: inbound-kafka-ui
     environment:
       KAFKA_CLUSTERS_0_NAME: inbound

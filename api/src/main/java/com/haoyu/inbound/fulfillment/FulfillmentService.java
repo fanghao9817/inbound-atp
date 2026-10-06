@@ -24,8 +24,9 @@ public class FulfillmentService {
         if (request.fc() != null) {
             catalog.requireFc(request.fc());
         }
-        FulfillmentJdbcDao.Snapshot snapshot = dao.snapshot(request.sku(), request.fc());
+        LocalDate today = LocalDate.now(clock);
+        FulfillmentJdbcDao.Snapshot snapshot = dao.snapshot(request.sku(), request.fc(), today);
         return AllocationPlanner.plan(request.sku(), request.fc(), request.requestedQuantity(),
-                snapshot.inventoryAvailable(), snapshot.inbound(), LocalDate.now(clock));
+                snapshot.inventoryAvailable(), snapshot.inbound(), today);
     }
 }
