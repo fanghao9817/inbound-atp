@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_orders
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['RESERVED', 'SCHEDULED', 'BACKORDERED', 'SHIPPED', 'CANCELLED', 'REJECTED']
+  - name: orders_daily
+    description: Live demand per business day (Vancouver), FC and channel, and how it was served.
+    columns:
+      - name: day
+        tests: [not_null]
+  - name: inventory_movements_daily
+    description: Stock ledger rolled up per business day, FC, SKU and movement kind.
+  - name: eta_accuracy
+    description: Each received container's prediction as it stood 14 days before arrival, vs the actual arrival.
+    columns:
+      - name: shipment_id
+        tests: [unique, not_null]
+  - name: eta_accuracy_by_lane
+    description: P80 hit rate and mean error per lane, last 90 days.

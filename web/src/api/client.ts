@@ -1,7 +1,7 @@
 import type {
-  AppConfig,
-  AtpQuote, FcSummary, FulfillmentCenter, FulfillmentRequest, FulfillmentResponse, LaneStats, LateShipment,
-  MilestoneResponse, PurchaseOrderView, RecalcSummary, ShipmentView, Sku, Stage, StorefrontAvailability,
+  Activity, AppConfig, AtpQuote, Day, EtaPreview, FcSummary, FulfillmentCenter, FulfillmentRequest, FulfillmentResponse,
+  Kpis, LaneStats, LateShipment, OrderView, PurchaseOrderView, RefreshSummary, Shortage, ShipmentView, Sku, Stage,
+  StorefrontAvailability,
 } from './types'
 
 export class ApiError extends Error {
@@ -34,13 +34,21 @@ export const api = {
     request<FulfillmentResponse>('/api/fulfillment/quote', { method: 'POST', body: JSON.stringify(body) }),
   purchaseOrders: (status = 'OPEN') => request<PurchaseOrderView[]>(`/api/purchase-orders?${q({ status })}`),
   shipment: (id: number) => request<ShipmentView>(`/api/shipments/${id}`),
-  postMilestone: (id: number, body: { type: Stage; occurredAt: string; source?: string; eventId?: string }) =>
-    request<MilestoneResponse>(`/api/shipments/${id}/milestones`, { method: 'POST', body: JSON.stringify(body) }),
+  /** What-if: the prediction a milestone would produce. Nothing is recorded (milestones come from the carrier feed). */
+  etaPreview: (id: number, body: { type: Stage; occurredAt: string }) =>
+    request<EtaPreview>(`/api/shipments/${id}/eta-preview`, { method: 'POST', body: JSON.stringify(body) }),
   exceptions: () => request<LateShipment[]>('/api/exceptions'),
+  shortages: () => request<Shortage[]>('/api/exceptions/shortages'),
   laneStats: () => request<LaneStats[]>('/api/lanes/stats'),
-  recalculateAll: () => request<RecalcSummary>('/api/eta/recalculate-all', { method: 'POST', body: '{}' }),
+  lastRefresh: () => request<RefreshSummary>('/api/refresh/last'),
   config: () => request<AppConfig>('/api/config'),
-  projectAll: () => request<{ items: number }>('/api/availability/project-all', { method: 'POST', body: '{}' }),
+  kpis: () => request<Kpis>('/api/dashboard/kpis'),
+  daily: (days = 28) => request<Day[]>(`/api/dashboard/daily?${q({ days })}`),
+  activity: (limit = 40) => request<Activity[]>(`/api/activity?${q({ limit })}`),
+  orders: (status?: string, channel?: string, limit = 100) => request<OrderView[]>(`/api/orders?${q({ status, channel, limit })}`),
+  /** A visitor's order: same decision as every order, at most 5 units, excluded from KPIs, cancelled after an hour. */
+  placeVisitorOrder: (body: { sku: string; fc?: string; qty: number }) =>
+    request<OrderView>('/api/orders', { method: 'POST', body: JSON.stringify(body) }),
   /** Straight to the Lambda Function URL — the storefront never touches the operational database. */
   storefront: (baseUrl: string, sku: string) =>
     request<StorefrontAvailability>(`${baseUrl.replace(/\/$/, '')}/?${q({ sku })}`),

@@ -14,7 +14,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['BOOKED', 'DEPARTED_ORIGIN', 'ARRIVED_DEST_PORT', 'CUSTOMS_CLEARED']
+              arguments:
+                values: ['BOOKED', 'DEPARTED_ORIGIN', 'ARRIVED_DEST_PORT', 'CUSTOMS_CLEARED']
       - name: p50_days
         tests: [not_null]
       - name: p80_days

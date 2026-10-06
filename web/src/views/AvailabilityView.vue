@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { usePolling } from '@/composables/usePolling'
+import { ptTime } from '@/lib/format'
 import { api, ApiError } from '@/api/client'
 import type { AppConfig, AtpQuote, FcSummary, FulfillmentResponse, StorefrontAvailability } from '@/api/types'
 import { useCatalogStore } from '@/stores/catalog'
@@ -20,7 +22,6 @@ const error = ref<string | null>(null)
 const config = ref<AppConfig | null>(null)
 const storefront = ref<StorefrontAvailability | null>(null)
 const storefrontError = ref<string | null>(null)
-const projecting = ref(false)
 
 async function loadStorefront() {
   if (!config.value?.availabilityUrl) return
@@ -30,17 +31,6 @@ async function loadStorefront() {
   } catch (e) {
     storefront.value = null
     storefrontError.value = e instanceof ApiError ? e.detail : String(e)
-  }
-}
-
-async function projectAll() {
-  projecting.value = true
-  try {
-    await api.projectAll()
-    await new Promise((r) => setTimeout(r, 1500)) // the Lambda is invoked asynchronously
-    await loadStorefront()
-  } finally {
-    projecting.value = false
   }
 }
 
@@ -82,6 +72,12 @@ onMounted(async () => {
 })
 watch([sku, qty], () => load())
 watch(sku, () => loadStorefront())
+// the simulator keeps stock moving: refresh quietly every minute (the first tick waits for onMounted's load)
+let first = true
+usePolling(async () => {
+  if (first) { first = false; return }
+  if (!loading.value) await Promise.all([load(), loadStorefront()])
+}, 60_000)
 </script>
 
 <template>
@@ -162,10 +158,10 @@ watch(sku, () => loadStorefront())
         </table>
       </div>
 
-      <h2 style="margin-top: 16px">Committed demand subtracted</h2>
+      <h2 style="margin-top: 16px">Committed demand subtracted <span class="muted" style="font-weight: normal">(scheduled and backordered orders)</span></h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Reference</th><th class="num">Qty</th><th>Need by</th></tr></thead>
+          <thead><tr><th>Order</th><th class="num">Qty</th><th>Promised for</th></tr></thead>
           <tbody>
             <tr v-for="d in quote.demands" :key="d.reference"><td>{{ d.reference }}</td><td class="num">{{ d.qty }}</td><td>{{ d.needBy }}</td></tr>
             <tr v-if="!quote.demands.length"><td colspan="3" class="muted">No commitments within the horizon.</td></tr>
@@ -203,14 +199,14 @@ watch(sku, () => loadStorefront())
   <section class="panel" v-if="config?.availabilityUrl" style="margin-top: 16px">
     <h2>Storefront projection (DynamoDB via Lambda)</h2>
     <p class="note" style="margin: 0 0 10px">
-      What a storefront would read: a DynamoDB copy of this SKU's availability, refreshed by a Lambda whenever a
-      container's predicted arrival changes (<code>shipment.eta-updated</code> → SDK invoke → conditional put on
-      <code>updatedAt</code>). This panel calls the Lambda Function URL directly — the operational database is never on that path.
+      What a storefront would read: a DynamoDB copy of this SKU's availability, refreshed by a Lambda whenever
+      anything changes what can be promised - an order, a receipt, a new prediction (<code>availability.changed</code>
+      → SDK invoke → conditional put on <code>updatedAtMs</code>, so an older event never overwrites a newer row).
+      This panel calls the Lambda Function URL directly - the operational database is never on that path.
     </p>
     <div class="controls" style="margin-bottom: 8px">
       <button @click="loadStorefront">Re-read</button>
-      <button @click="projectAll" :disabled="projecting">{{ projecting ? 'Projecting…' : 'Re-project all SKUs' }}</button>
-      <span v-if="storefront" class="muted">last write {{ storefront.updatedAt.slice(0, 19).replace('T', ' ') }}</span>
+      <span v-if="storefront" class="muted">last write {{ ptTime(storefront.updatedAt) }}</span>
       <span v-if="storefrontError" class="error">{{ storefrontError }}</span>
     </div>
     <div class="table-wrap" v-if="storefront">

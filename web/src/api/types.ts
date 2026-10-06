@@ -36,14 +36,45 @@ export interface Shipment {
 }
 export interface Milestone { id: number; shipmentId: number; type: Stage; occurredAt: string; source: string; eventId: string; recordedAt: string }
 export interface ShipmentView { shipment: Shipment; lane: { originPort: string; destFcCode: string; receivingBufferDays: number }; milestones: Milestone[] }
-export interface MilestoneResponse { shipmentId: number; eventId: string; accepted: boolean; note: string }
+export interface EtaPreview {
+  currentArrival?: string; currentConfidence?: Confidence; previewArrival?: string; previewConfidence?: Confidence; basis: string
+}
 
 export interface LateShipment {
   shipmentId: number; poNumber: string; originPort: string; destFc: string; currentStage: Stage; plannedArrival: string
-  predictedArrival: string; daysLate: number; confidence: Confidence; basis: string; commitmentsDueBeforeArrival: number
+  predictedArrival: string; daysLate: number; confidence: Confidence; basis: string
+  /** OVERDUE: past its predicted date and not at the FC; LATE_VS_PLAN: predicted after the carrier's plan */
+  reason: 'OVERDUE' | 'LATE_VS_PLAN'; commitmentsDueBeforeArrival: number
+}
+export interface Shortage {
+  sku: string; fc: string; firstShortDate: string; unitsShort: number; availableNow: number; inboundUnits: number; committedUnits: number
 }
 export interface LaneStats { originPort: string; destFcCode: string; fromStage: Stage; toStage: Stage; p50Days: number; p80Days: number; sampleN: number }
-export interface RecalcSummary { shipments: number; changed: number }
+export interface RecalcSummary { shipments: number; changed: number; failed: number }
+export interface RefreshSummary { finishedAt?: string; rescored?: RecalcSummary; projected?: number }
+
+export type OrderStatus = 'RESERVED' | 'SCHEDULED' | 'BACKORDERED' | 'SHIPPED' | 'CANCELLED' | 'REJECTED'
+export interface OrderView {
+  id: number; orderRef: string; channel: 'ONLINE' | 'B2B' | 'STORE'; origin: 'FEED' | 'VISITOR' | 'SEED' | 'MIGRATED'
+  sku: string; fc: string; qty: number; status: OrderStatus; promiseDate?: string; firstPromiseDate?: string; needBy?: string
+  createdAt: string; reservedAt?: string; shippedAt?: string; cancelledAt?: string
+}
+
+/** GET /api/dashboard/kpis - "yesterday same time" and "last WTD" are the same span of the previous day / week. */
+export interface Kpis {
+  asOf: string; historySince?: string
+  ordersToday: number; ordersYesterdaySameTime: number; unitsOrderedToday: number; unitsOrderedYesterdaySameTime: number
+  ordersWtd: number; ordersLastWtd: number
+  unitsShippedToday: number; unitsShippedYesterdaySameTime: number; unitsShippedWtd: number; unitsShippedLastWtd: number
+  containersGatedInWtd: number; containersGatedInLastWtd: number; unitsReceivedWtd: number; unitsReceivedLastWtd: number
+  awaitingShipment: number; scheduledOrders: number; openBackorders: number; lateBackorders: number
+  ordersRejected7d: number; unitsRejected7d: number; servedFromStock7d?: number
+  repromisedToday: number; etaChangesToday: number; lateContainers: number; overdueContainers: number; openContainers: number
+  p80HitRate28d?: number; predictionsScored28d: number; meanAbsErrorDays28d?: number
+  minutesSinceLastMilestone?: number; minutesSinceLastOrder?: number; outboxPending: number; outboxOldestSeconds?: number
+}
+export interface Day { day: string; orders: number; unitsOrdered: number; unitsShipped: number; unitsReceived: number; backordersCreated: number; rejected: number }
+export interface Activity { at: string; kind: string; title: string; detail: string }
 
 export interface AppConfig { availabilityUrl: string; projectionEnabled: boolean }
 /** Row served by the storefront Lambda (DynamoDB projection). */

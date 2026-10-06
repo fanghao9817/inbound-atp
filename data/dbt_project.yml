@@ -16,6 +16,14 @@ models:
       +materialized: view
     marts:
       +materialized: table
+    # orders, stock and prediction accuracy: PostgreSQL only (the Databricks snapshot has the lane tables only)
+    ops:
+      +enabled: "{{ target.type == 'postgres' }}"
+      +materialized: view
+      orders_daily:
+        +materialized: table
+      eta_accuracy:
+        +materialized: table
 
 # Seeds are a snapshot of the operational tables (exported from PostgreSQL) so the Databricks target,
 # which has no connection to the operational database, can run the same models. Disabled on Postgres,
