@@ -30,6 +30,11 @@ public class LaneStatsRepository {
                 .optional();
     }
 
+    /** When dbt last rebuilt the statistics (null before the first build). */
+    public java.time.OffsetDateTime computedAt() {
+        return jdbc.sql("select max(computed_at) from analytics.lane_lead_time_stats").query(java.time.OffsetDateTime.class).optional().orElse(null);
+    }
+
     public List<LaneStats> listAll() {
         return jdbc.sql(SELECT + " order by origin_port, dest_fc_code, from_stage").query(LaneStats.class).list();
     }

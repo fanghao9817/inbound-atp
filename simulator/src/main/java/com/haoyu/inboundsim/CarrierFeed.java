@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>Containers that were already at sea when the simulator went live have their next stage drawn
  * conditional on "not before go-live" (rejection sampling over salts), so the existing book does not
- * all land at once. Only if that fails 20 times is the event spread over the two days after go-live
+ * all land at once. Only if that fails 200 times is the event spread over the two days after go-live
  * and marked CARRIER_EDI_RECOVERY, which keeps it out of lane statistics and accuracy scoring.
  */
 @Component
@@ -55,8 +55,10 @@ class CarrierFeed {
         try {
             for (ApiClient.PurchaseOrder po : api.openPurchaseOrders()) {
                 if (po.shipmentId() == null) continue;
-                Container c = new Container(po.poNumber(), po.originPort(), po.destFc());
                 ApiClient.ShipmentView view = api.shipment(po.shipmentId());
+                Object planned = view.shipment().get("plannedDeparture");
+                Container c = new Container(po.poNumber(), po.originPort(), po.destFc(),
+                        planned == null ? null : java.time.LocalDate.parse(planned.toString()));
                 ApiClient.Milestone last = view.milestones().stream()
                         .max(Comparator.comparing((ApiClient.Milestone m) -> Stage.valueOf(m.type()).ordinal())).orElse(null);
                 if (last == null) continue;                                  // not even booked: nothing to report yet
@@ -65,8 +67,10 @@ class CarrierFeed {
                 Instant recorded = last.recordedAt().toInstant();
                 while (stage != Stage.RECEIVED_FC) {
                     Next next = next(c, stage, at, recorded);
-                    if (next.at().isAfter(now)) break;
                     Stage s = stage.next();
+                    // the message arrives some time after the event (late EDI); a recovery event is reported as soon as it is due
+                    Instant reportAt = next.recovery() ? next.at() : next.at().plus(TransitModel.reportingLag(props.seed(), c, s));
+                    if (reportAt.isAfter(now)) break;
                     int status = api.milestone(po.shipmentId(), s, next.at(), next.recovery() ? "CARRIER_EDI_RECOVERY" : s.source(),
                             eventId(po.poNumber(), s.name()));
                     if (status >= 300) {
@@ -78,7 +82,7 @@ class CarrierFeed {
                     at = next.at();
                     recorded = now;
                 }
-                if (stage == Stage.RECEIVED_FC && receiveIfDue(po, view, c, at, now)) received++;
+                if (stage == Stage.RECEIVED_FC && receiveIfDue(po, view, c, at, recorded, now)) received++;
             }
         } catch (RuntimeException e) {
             log.warn("carrier feed tick failed: {}", e.toString());
@@ -91,7 +95,7 @@ class CarrierFeed {
         if (!recorded.isBefore(live)) {
             return new Next(TransitModel.nextStageTime(props.seed(), c, stage, at, 0), false);
         }
-        for (int salt = 0; salt < 20; salt++) {
+        for (int salt = 0; salt < 200; salt++) {
             Instant t = TransitModel.nextStageTime(props.seed(), c, stage, at, salt);
             if (t.isAfter(live)) return new Next(t, false);
         }
@@ -99,8 +103,9 @@ class CarrierFeed {
         return new Next(live.plus(Duration.ofMinutes(60 + r.nextInt(47 * 60))), true);
     }
 
-    private boolean receiveIfDue(ApiClient.PurchaseOrder po, ApiClient.ShipmentView view, Container c, Instant gateIn, Instant now) {
-        Instant grnAt = TransitModel.goodsReceiptTime(props.seed(), c, gateIn, view.lane().receivingBufferDays());
+    private boolean receiveIfDue(ApiClient.PurchaseOrder po, ApiClient.ShipmentView view, Container c, Instant gateIn,
+                                 Instant gateInRecorded, Instant now) {
+        Instant grnAt = receiptTime(c, gateIn, gateInRecorded, view.lane().receivingBufferDays());
         if (grnAt.isAfter(now)) return false;
         List<Map<String, Object>> lines = new ArrayList<>();
         for (ApiClient.Line l : po.lines()) {
@@ -115,6 +120,22 @@ class CarrierFeed {
         int status = api.receipt(po.shipmentId(), eventId(po.poNumber(), "GRN"), grnAt, lines);
         if (status >= 300 && status != 409) log.warn("{} goods receipt refused with {}", po.poNumber(), status);
         return status < 300;
+    }
+
+    /**
+     * When the warehouse posts the receipt. A container that was already at the dock before go-live gets
+     * a time after go-live (same day if any alternative draw allows it, else the next day shift), so no
+     * receipt is ever back-dated into the seeded past - the same conditioning as the transit stages.
+     */
+    Instant receiptTime(Container c, Instant gateIn, Instant gateInRecorded, int bufferDays) {
+        Instant live = goLive.at();
+        Instant t = TransitModel.goodsReceiptTime(props.seed(), c, gateIn, bufferDays, 0);
+        if (!gateInRecorded.isBefore(live) || t.isAfter(live)) return t;
+        for (int salt = 1; salt < 200; salt++) {
+            Instant alt = TransitModel.goodsReceiptTime(props.seed(), c, gateIn, bufferDays, salt);
+            if (alt.isAfter(live)) return alt;
+        }
+        return TransitModel.nextReceiptShift(props.seed(), c, live);
     }
 
     static UUID eventId(String poNumber, String what) {

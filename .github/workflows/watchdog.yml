@@ -1,7 +1,9 @@
 name: watchdog
 
-# Hourly check, from outside the box, that the live demo is up and its world is still moving.
-# A failed scheduled run makes GitHub email the repository owner, which is the whole alerting system.
+# Check, from outside the box, that the live demo is up and its world is still moving, and that the
+# nightly job rebuilt the statistics. A failed scheduled run makes GitHub email the repository owner.
+# Scheduled at :17 every hour, but GitHub runs schedules best-effort: in practice every few hours.
+# GitHub also disables schedules in a public repository after 60 days without a commit.
 on:
   schedule:
     - cron: '17 * * * *'
@@ -29,4 +31,14 @@ jobs:
           echo "$k" | jq -e '.minutesSinceLastMilestone != null and .minutesSinceLastMilestone < 4320' >/dev/null || { echo "::error::no milestone for 3 days"; fail=1; }
           # events leave the outbox within 10 minutes (Kafka reachable)
           echo "$k" | jq -e '(.outboxOldestSeconds // 0) < 600' >/dev/null || { echo "::error::outbox is backing up - Kafka down?"; fail=1; }
+          # the nightly job (00:30 Vancouver) rebuilt the lane statistics within the last 26 hours
+          r=$(curl -fsS --retry 3 --retry-delay 20 "$BASE/api/refresh/last")
+          echo "$r" | jq '{finishedAt, statsComputedAt, statsAgeMinutes}'
+          echo "$r" | jq -e '.statsAgeMinutes != null and .statsAgeMinutes < 1560' >/dev/null \
+            || { echo "::error::lane statistics older than 26 h - nightly job failed?"; fail=1; }
+          # the internal API stays invisible from the internet, whatever the path spelling
+          for p in /api/internal/notes '/api/internal;x/notes' /api/internal%3Bx/notes /api/internal; do
+            c=$(curl -s -o /dev/null -w '%{http_code}' --path-as-is --retry 3 --retry-delay 5 --retry-all-errors --max-time 15 "$BASE$p" || true)
+            [ "$c" = 404 ] || { echo "::error::$p answered $c from the internet"; fail=1; }
+          done
           exit $fail

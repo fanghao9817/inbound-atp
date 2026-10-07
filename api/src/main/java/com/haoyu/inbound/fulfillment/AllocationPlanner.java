@@ -31,7 +31,7 @@ public final class AllocationPlanner {
             if (take <= 0) continue;
             allocations.add(new PurchaseOrderAllocation(line.purchaseOrderId(), line.poNumber(), take, line.expectedAt(), line.confidence()));
             gap -= take;
-            fulfilledBy = line.expectedAt();
+            if (line.expectedAt().isAfter(fulfilledBy)) fulfilledBy = line.expectedAt();   // the latest line taken decides
         }
         boolean fully = gap == 0;
         return new FulfillmentResponse(sku, fc, requested, requested - gap, gap, fromInventory,

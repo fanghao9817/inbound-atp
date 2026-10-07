@@ -1,5 +1,6 @@
 package com.haoyu.inbound.atp;
 
+import com.haoyu.inbound.common.BusinessCalendar;
 import com.haoyu.inbound.atp.AtpCalculator.Demand;
 import com.haoyu.inbound.atp.AtpCalculator.Point;
 import com.haoyu.inbound.atp.AtpCalculator.Result;
@@ -65,18 +66,36 @@ public class AtpService {
     }
 
     /**
-     * When inbound stock becomes sellable: arrival plus the FC's dock-to-stock days, and never before
-     * tomorrow - a container that has not been put away is not in the building, however overdue it is.
+     * When inbound stock becomes sellable: arrival plus the FC's dock-to-stock working days (the
+     * warehouse doesn't put away on Sundays), and never before the next working day - a container that
+     * has not been put away is not in the building, however overdue it is.
      * (Past-due DEMAND, by contrast, rightly counts as due today; AtpCalculator folds it onto today.)
      */
     public static LocalDate sellableFrom(InboundSupply s, FulfillmentCenter fc, LocalDate today) {
-        LocalDate planned = s.effectiveArrival().plusDays(fc.receivingBufferDays());
-        return planned.isAfter(today) ? planned : today.plusDays(1);
+        LocalDate planned = BusinessCalendar.addWorkingDays(s.effectiveArrival(), fc.receivingBufferDays());
+        return planned.isAfter(today) ? planned : BusinessCalendar.nextWorkingDay(today);
+    }
+
+    /**
+     * The same date for checking a promise already made: stock planned to be put away today still
+     * counts for today, because the receipt is expected later in the day. Only stock that should have
+     * been put away before today and wasn't moves to the next working day. Used to decide whether a
+     * promise has to move - never to reserve, which needs stock that is physically on hand.
+     */
+    static LocalDate expectedSellable(InboundSupply s, FulfillmentCenter fc, LocalDate today) {
+        LocalDate planned = BusinessCalendar.addWorkingDays(s.effectiveArrival(), fc.receivingBufferDays());
+        return planned.isBefore(today) ? BusinessCalendar.nextWorkingDay(today) : planned;
     }
 
     public Result timeline(Inputs in, FulfillmentCenter fc, LocalDate today) {
+        return timeline(in, fc, today, false);
+    }
+
+    /** @param dueTodayCountsToday true when re-checking existing promises (see {@link #expectedSellable}) */
+    public Result timeline(Inputs in, FulfillmentCenter fc, LocalDate today, boolean dueTodayCountsToday) {
         List<Supply> supplies = in.inbound().stream()
-                .map(s -> new Supply(sellableFrom(s, fc, today), s.qtyOutstanding(), s.poNumber()))
+                .map(s -> new Supply(dueTodayCountsToday ? expectedSellable(s, fc, today) : sellableFrom(s, fc, today),
+                        s.qtyOutstanding(), s.poNumber()))
                 .toList();
         List<Demand> demands = in.commitments().stream()
                 .map(d -> new Demand(d.needBy(), d.qty(), d.reference()))

@@ -97,23 +97,24 @@ const pillTone: Record<string, string> = { RESERVED: 'ok', SHIPPED: 'ok', SCHEDU
     <label class="field">Channel
       <select v-model="channel" @change="refresh"><option value="">all</option><option>ONLINE</option><option>B2B</option><option>STORE</option></select>
     </label>
-    <span class="muted">latest {{ rows.length }} · updates every 15 s</span>
+    <span class="muted">latest {{ rows.length }} · updates every 15 s · times in Vancouver time</span>
     <span v-if="error" class="error">{{ error }}</span>
   </div>
   <section class="panel table-wrap">
     <table>
-      <thead><tr><th>Placed</th><th>Order</th><th>Channel</th><th>SKU</th><th>FC</th><th class="num">Qty</th><th>Status</th><th>Promised</th><th>Need by</th><th>Shipped</th></tr></thead>
+      <thead><tr><th>Placed</th><th>Order</th><th>Channel</th><th>SKU</th><th>FC</th><th class="num">Qty</th><th>Decision</th><th>Now</th><th>Promised</th><th>Need by</th><th>Shipped</th></tr></thead>
       <tbody>
         <tr v-for="o in rows" :key="o.id">
-          <td :title="ptTime(o.createdAt)">{{ ptTime(o.createdAt).replace(' PT', '') }}</td>
+          <td>{{ ptTime(o.createdAt) }}</td>
           <td><b>{{ o.orderRef }}</b> <span v-if="o.origin !== 'FEED'" class="muted" style="font-size: 11px">{{ o.origin.toLowerCase() }}</span></td>
           <td>{{ o.channel }}</td><td>{{ o.sku }}</td><td>{{ o.fc }}</td><td class="num">{{ o.qty }}</td>
-          <td><span class="pill" :class="pillTone[o.status]">{{ o.status }}</span></td>
+          <td><span class="pill" :class="pillTone[o.placedStatus]">{{ o.placedStatus }}</span></td>
+          <td><span v-if="o.status !== o.placedStatus" class="pill" :class="pillTone[o.status]">{{ o.status }}</span><span v-else class="muted">—</span></td>
           <td>{{ o.promiseDate ?? '—' }}<span v-if="o.firstPromiseDate && o.promiseDate && o.promiseDate !== o.firstPromiseDate" class="error" :title="`first promised ${o.firstPromiseDate}`"> (moved)</span></td>
           <td>{{ o.needBy ?? '—' }}</td>
           <td>{{ o.shippedAt ? ptClock(o.shippedAt) : '—' }}</td>
         </tr>
-        <tr v-if="!rows.length && !loading"><td colspan="10" class="muted">No orders.</td></tr>
+        <tr v-if="!rows.length && !loading"><td colspan="11" class="muted">No orders.</td></tr>
       </tbody>
     </table>
   </section>

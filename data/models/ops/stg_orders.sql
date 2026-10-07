@@ -9,6 +9,7 @@ select
     fc.code                                as fc_code,
     o.qty,
     o.status,
+    o.placed_status,                       -- the decision when it was placed
     o.created_at,
     {{ local_date('o.created_at') }}       as created_day,
     o.reserved_at,

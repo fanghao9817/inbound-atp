@@ -29,5 +29,5 @@ sources:
       - name: inventory_movement
         description: Append-only stock ledger; per position the deltas sum to inventory_position.
       - name: eta_prediction_log
-        description: Every arrival prediction the API made, with the stage it was made from and why.
+        description: Every change of arrival prediction the API made, with the stage it was made from and why.
       - name: goods_receipt

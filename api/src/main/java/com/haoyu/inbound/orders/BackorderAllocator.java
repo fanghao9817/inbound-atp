@@ -72,19 +72,23 @@ public class BackorderAllocator {
         inventory.lock(skuId, fcId);
         int allocated = 0, repromised = 0;
         for (CustomerOrder o : orders.commitments(skuId, fcId)) {
-            Optional<java.time.LocalDate> earliest = atp.timeline(atp.inputs(skuId, fc, today, o.id()), fc, today).earliestDateFor(o.qty());
+            var inputs = atp.inputs(skuId, fc, today, o.id());
+            Optional<java.time.LocalDate> earliest = atp.timeline(inputs, fc, today).earliestDateFor(o.qty());
             boolean due = o.needBy() == null || !o.needBy().isAfter(window);
             if (due && earliest.filter(d -> !d.isAfter(today)).isPresent()) {
                 if (orders.markReservedFromCommitment(o.id()) == 0) continue;           // cancelled meanwhile
                 inventory.reserve(skuId, fcId, o.qty(), new Ref("ORDER", o.id()));
                 allocated++;
-            } else if (earliest.isPresent() && o.promiseDate() != null && earliest.get().isAfter(o.promiseDate())) {
-                if (orders.repromise(o.id(), earliest.get()) == 1) {
+            } else if (o.promiseDate() != null) {
+                // does the promise still hold? Stock due to be put away today counts for today here: the
+                // receipt posts later in the day and reserves the order then, so it isn't a slip.
+                Optional<java.time.LocalDate> expected = atp.timeline(inputs, fc, today, true).earliestDateFor(o.qty());
+                if (expected.isPresent() && expected.get().isAfter(o.promiseDate()) && orders.repromise(o.id(), expected.get()) == 1) {
                     repromised++;
                     jdbc.sql("insert into ops_note (ref, kind, message) values (:ref, 'PROMISE', :msg) on conflict (ref) do nothing")
-                            .param("ref", "repromise-" + o.id() + "-" + earliest.get())
-                            .param("msg", "%s: promise moved %s → %s (inbound stock later than planned)"
-                                    .formatted(o.orderRef(), o.promiseDate(), earliest.get()))
+                            .param("ref", "repromise-" + o.id() + "-" + expected.get())
+                            .param("msg", "%s: promise moved %s → %s (not enough stock or inbound supply for %d units by %s)"
+                                    .formatted(o.orderRef(), o.promiseDate(), expected.get(), o.qty(), o.promiseDate()))
                             .update();
                 }
             }

@@ -33,7 +33,7 @@ public class DashboardRepository {
                        int unitsShippedToday, int unitsShippedYesterdaySameTime, int unitsShippedWtd, int unitsShippedLastWtd,
                        int containersGatedInWtd, int containersGatedInLastWtd, int unitsReceivedWtd, int unitsReceivedLastWtd,
                        int awaitingShipment, int scheduledOrders, int openBackorders, int lateBackorders,
-                       int ordersRejected7d, int unitsRejected7d, BigDecimal servedFromStock7d,
+                       int ordersRejected7d, int unitsRejected7d, BigDecimal onTimeShare7d,
                        int repromisedToday, int etaChangesToday, int lateContainers, int overdueContainers, int openContainers,
                        BigDecimal p80HitRate28d, int predictionsScored28d, BigDecimal meanAbsErrorDays28d,
                        Integer minutesSinceLastMilestone, Integer minutesSinceLastOrder, int outboxPending, Integer outboxOldestSeconds) {}
@@ -41,7 +41,7 @@ public class DashboardRepository {
     public record Day(LocalDate day, int orders, int unitsOrdered, int unitsShipped, int unitsReceived, int backordersCreated,
                       int rejected) {}
 
-    public record Activity(OffsetDateTime at, String kind, String title, String detail) {}
+    public record Activity(String eventKey, OffsetDateTime at, String kind, String title, String detail) {}
 
     private final JdbcClient jdbc;
     private final Clock clock;
@@ -91,10 +91,10 @@ public class DashboardRepository {
                   (select coalesce(sum(qty), 0) from feed where created_at >= :yesterdayStart and created_at < :yesterdayNow) as units_ordered_yesterday_same_time,
                   (select count(*) from feed where created_at >= :weekStart and created_at < :now) as orders_wtd,
                   (select count(*) from feed where created_at >= :lastWeekStart and created_at < :lastWeekNow) as orders_last_wtd,
-                  (select coalesce(sum(qty), 0) from customer_order where shipped_at >= :todayStart and shipped_at < :now) as units_shipped_today,
-                  (select coalesce(sum(qty), 0) from customer_order where shipped_at >= :yesterdayStart and shipped_at < :yesterdayNow) as units_shipped_yesterday_same_time,
-                  (select coalesce(sum(qty), 0) from customer_order where shipped_at >= :weekStart and shipped_at < :now) as units_shipped_wtd,
-                  (select coalesce(sum(qty), 0) from customer_order where shipped_at >= :lastWeekStart and shipped_at < :lastWeekNow) as units_shipped_last_wtd,
+                  (select coalesce(sum(qty), 0) from feed where shipped_at >= :todayStart and shipped_at < :now) as units_shipped_today,
+                  (select coalesce(sum(qty), 0) from feed where shipped_at >= :yesterdayStart and shipped_at < :yesterdayNow) as units_shipped_yesterday_same_time,
+                  (select coalesce(sum(qty), 0) from feed where shipped_at >= :weekStart and shipped_at < :now) as units_shipped_wtd,
+                  (select coalesce(sum(qty), 0) from feed where shipped_at >= :lastWeekStart and shipped_at < :lastWeekNow) as units_shipped_last_wtd,
                   (select count(*) from shipment_milestone where type = 'RECEIVED_FC' and occurred_at >= :weekStart and occurred_at < :now) as containers_gated_in_wtd,
                   (select count(*) from shipment_milestone where type = 'RECEIVED_FC' and occurred_at >= :lastWeekStart and occurred_at < :lastWeekNow) as containers_gated_in_last_wtd,
                   (select coalesce(sum(on_hand_delta), 0) from inventory_movement where kind = 'RECEIPT' and occurred_at >= :weekStart and occurred_at < :now) as units_received_wtd,
@@ -105,8 +105,10 @@ public class DashboardRepository {
                   (select count(*) from customer_order where status = 'BACKORDERED' and origin <> 'VISITOR' and promise_date < :today) as late_backorders,
                   (select count(*) from feed where status = 'REJECTED' and created_at >= :weekAgo) as orders_rejected7d,
                   (select coalesce(sum(qty), 0) from feed where status = 'REJECTED' and created_at >= :weekAgo) as units_rejected7d,
-                  (select round(avg(case when first_promise_date = (created_at at time zone 'America/Vancouver')::date then 1.0 else 0.0 end), 3)
-                     from feed where created_at >= :weekAgo) as served_from_stock7d,
+                  -- on time = the first promise met what the customer asked for: today (reserved from stock)
+                  -- for an online order, the need-by date (scheduled) for B2B; backordered and rejected are misses
+                  (select round(avg(case when placed_status in ('RESERVED', 'SCHEDULED') then 1.0 else 0.0 end), 3)
+                     from feed where created_at >= :weekAgo) as on_time_share7d,
                   (select count(*) from ops_note where kind = 'PROMISE' and created_at >= :todayStart) as repromised_today,
                   (select count(*) from eta_prediction_log where computed_at >= :todayStart and reason in ('MILESTONE', 'DAILY')) as eta_changes_today,
                   (select count(*) from shipment s join purchase_order po on po.id = s.po_id
@@ -144,15 +146,15 @@ public class DashboardRepository {
                   from customer_order where origin = 'FEED' and created_at >= :from group by 1
                 union all
                 select (shipped_at at time zone 'America/Vancouver')::date, 2, sum(qty)::int
-                  from customer_order where shipped_at >= :from group by 1
+                  from customer_order where origin = 'FEED' and shipped_at >= :from group by 1
                 union all
                 select (occurred_at at time zone 'America/Vancouver')::date, 3, sum(on_hand_delta)::int
                   from inventory_movement where kind = 'RECEIPT' and occurred_at >= :from group by 1
                 union all
-                -- created as a backorder = first promised for a later day than the day it was placed
+                -- created as a backorder: promised later than the customer asked (B2B scheduled for its date is not)
                 select (created_at at time zone 'America/Vancouver')::date, 4, count(*)::int
                   from customer_order where origin = 'FEED' and created_at >= :from
-                   and first_promise_date > (created_at at time zone 'America/Vancouver')::date group by 1
+                   and placed_status = 'BACKORDERED' group by 1
                 union all
                 select (created_at at time zone 'America/Vancouver')::date, 5, count(*)::int
                   from customer_order where origin = 'FEED' and status = 'REJECTED' and created_at >= :from group by 1
@@ -169,45 +171,50 @@ public class DashboardRepository {
         return out;
     }
 
-    /** What just happened, newest first. Only codes, enums and numbers are shown - never text a caller supplied. */
+    /**
+     * What just happened, newest first. Only codes, enums and numbers are shown - never text a caller
+     * supplied. Each row has a stable key (kind + id) and describes the event as it happened: an order
+     * row shows the decision taken when it was placed, not the status it has reached since.
+     */
     public List<Activity> activity(int limit) {
         return jdbc.sql("""
-                (select m.recorded_at as at, 'MILESTONE' as kind, po.po_number || ' ' || replace(m.type, '_', ' ') as title,
+                (select 'ms:' || m.id as event_key, m.recorded_at as at, 'MILESTONE' as kind,
+                        po.po_number || ' ' || replace(m.type, '_', ' ') as title,
                         po.origin_port || ' → ' || fc.code || ' · ' || m.source as detail
                    from shipment_milestone m join shipment s on s.id = m.shipment_id join purchase_order po on po.id = s.po_id
                    join fulfillment_center fc on fc.id = po.dest_fc_id
                    order by m.recorded_at desc limit :limit)
                 union all
-                (select o.created_at, 'ORDER', o.order_ref || ' ' || o.status,
+                (select 'order:' || o.id, o.created_at, 'ORDER', o.order_ref || ' ' || o.placed_status,
                         o.qty || ' × ' || sku.code || ' @ ' || fc.code ||
-                        case when o.status in ('BACKORDERED', 'SCHEDULED') then ' · promised ' || to_char(o.promise_date, 'Mon DD')
-                             when o.status = 'REJECTED' then ' · no date within the horizon' else '' end ||
+                        case when o.placed_status in ('BACKORDERED', 'SCHEDULED') then ' · promised ' || to_char(o.first_promise_date, 'Mon DD')
+                             when o.placed_status = 'REJECTED' then ' · no date within the horizon' else '' end ||
                         case when o.origin = 'VISITOR' then ' · visitor' else '' end
                    from customer_order o join sku on sku.id = o.sku_id join fulfillment_center fc on fc.id = o.fc_id
                    where o.origin in ('FEED', 'VISITOR')
                    order by o.created_at desc limit :limit)
                 union all
-                (select o.shipped_at, 'SHIPPED', o.order_ref || ' shipped', o.qty || ' × ' || sku.code || ' from ' || fc.code
+                (select 'ship:' || o.id, o.shipped_at, 'SHIPPED', o.order_ref || ' shipped', o.qty || ' × ' || sku.code || ' from ' || fc.code
                    from customer_order o join sku on sku.id = o.sku_id join fulfillment_center fc on fc.id = o.fc_id
                    where o.shipped_at is not null order by o.shipped_at desc limit :limit)
                 union all
-                (select g.recorded_at, 'RECEIPT', po.po_number || ' put away',
+                (select 'grn:' || g.id, g.recorded_at, 'RECEIPT', po.po_number || ' put away',
                         g.units_received || ' units into ' || fc.code || case when g.units_damaged > 0 then ' · ' || g.units_damaged || ' damaged' else '' end
                    from goods_receipt g join shipment s on s.id = g.shipment_id join purchase_order po on po.id = s.po_id
                    join fulfillment_center fc on fc.id = po.dest_fc_id
                    order by g.recorded_at desc limit :limit)
                 union all
-                (select l.computed_at, 'ETA', po.po_number || ' now due ' || to_char(l.predicted_arrival, 'Mon DD'),
+                (select 'eta:' || l.id, l.computed_at, 'ETA', po.po_number || ' now due ' || to_char(l.predicted_arrival, 'Mon DD'),
                         l.confidence || ' confidence · ' || lower(l.reason) || ' · from ' || replace(l.stage, '_', ' ')
                    from eta_prediction_log l join shipment s on s.id = l.shipment_id join purchase_order po on po.id = s.po_id
                    where l.reason in ('MILESTONE', 'DAILY', 'STATS_REFRESH')
                    order by l.computed_at desc limit :limit)
                 union all
-                (select po.created_at, 'PO', po.po_number || ' placed with ' || po.supplier, po.origin_port || ' → ' || fc.code
+                (select 'po:' || po.id, po.created_at, 'PO', po.po_number || ' placed with ' || po.supplier, po.origin_port || ' → ' || fc.code
                    from purchase_order po join fulfillment_center fc on fc.id = po.dest_fc_id
                    where po.client_ref is not null order by po.created_at desc limit :limit)
                 union all
-                (select n.created_at, n.kind, n.message, '' from ops_note n order by n.created_at desc limit :limit)
+                (select 'note:' || n.id, n.created_at, n.kind, n.message, '' from ops_note n order by n.created_at desc limit :limit)
                 order by at desc
                 limit :limit
                 """)

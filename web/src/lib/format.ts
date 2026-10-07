@@ -1,4 +1,8 @@
-/** Business time is Vancouver: every timestamp on the page is shown in Pacific time, whatever the viewer's zone. */
+/**
+ * Business time is Vancouver: every timestamp on the page is shown in Vancouver time, whatever the
+ * viewer's zone. (Not labelled "Pacific": from November 2026 British Columbia stays on UTC-7 all year
+ * while US Pacific time falls back.)
+ */
 export const BUSINESS_ZONE = 'America/Vancouver'
 
 const timeFmt = new Intl.DateTimeFormat('en-CA', {
@@ -6,13 +10,13 @@ const timeFmt = new Intl.DateTimeFormat('en-CA', {
 })
 const clockFmt = new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_ZONE, hour: '2-digit', minute: '2-digit', hour12: false })
 
-/** "Oct 6, 14:05 PT" */
+/** "Oct 6, 14:05" in Vancouver time */
 export function ptTime(iso?: string | null): string {
   if (!iso) return '—'
-  return `${timeFmt.format(new Date(iso))} PT`
+  return timeFmt.format(new Date(iso))
 }
 
-/** "14:05" in Pacific time */
+/** "14:05" in Vancouver time */
 export function ptClock(iso?: string | null): string {
   return iso ? clockFmt.format(new Date(iso)) : '—'
 }

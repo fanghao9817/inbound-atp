@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { ago, delta, ptClock, ptTime, sparkline } from '../format'
 
 describe('format', () => {
-  it('shows times in Pacific time whatever the viewer zone', () => {
+  it('shows times in Vancouver time whatever the viewer zone', () => {
     // 2026-10-06T21:05Z is 14:05 PDT
     expect(ptClock('2026-10-06T21:05:00Z')).toBe('14:05')
     expect(ptTime('2026-10-06T21:05:00Z')).toContain('14:05')
-    expect(ptTime('2026-10-06T21:05:00Z')).toMatch(/PT$/)
     // winter 2025 was still standard time (UTC-8). From 2026-11-01 tzdata 2026b keeps British Columbia on
     // UTC-7 all year, so later winter dates depend on the viewer's tz database and are not asserted here.
     expect(ptClock('2025-12-02T22:05:00Z')).toBe('14:05')

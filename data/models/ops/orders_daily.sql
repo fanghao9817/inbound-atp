@@ -1,20 +1,18 @@
 -- Demand and its outcome per business day, FC and channel. Counts live demand only (origin FEED: the
--- simulated customers), not seeded or visitor orders. Each order is served from stock (reserved at
--- once), promised later (backordered against inbound stock, or scheduled for a B2B date), or rejected.
-with flagged as (
-    select *, reserved_at is not null and reserved_at < created_at + interval '1 minute' as served_from_stock
+-- simulated customers), not seeded or visitor orders. Outcomes use the decision taken when each order
+-- was placed: reserved from stock, scheduled for the requested (B2B) date, backordered (promised later
+-- than asked), or rejected (no date within the horizon). On time = reserved or scheduled.
+with placed as (
+    select created_day as day, fc_code, channel,
+           count(*)                                                                as orders,
+           sum(qty)                                                                as units_ordered,
+           sum(case when placed_status = 'RESERVED' then qty else 0 end)           as units_from_stock,
+           sum(case when placed_status = 'SCHEDULED' then qty else 0 end)          as units_scheduled,
+           sum(case when placed_status = 'BACKORDERED' then qty else 0 end)        as units_backordered,
+           sum(case when placed_status = 'REJECTED' then qty else 0 end)           as units_rejected,
+           avg(case when placed_status <> 'REJECTED' then promised_lead_days end)  as avg_promised_lead_days
     from {{ ref('stg_orders') }}
     where origin = 'FEED'
-),
-placed as (
-    select created_day as day, fc_code, channel,
-           count(*)                                                                    as orders,
-           sum(qty)                                                                    as units_ordered,
-           sum(case when served_from_stock then qty else 0 end)                        as units_served_from_stock,
-           sum(case when not served_from_stock and status <> 'REJECTED' then qty else 0 end) as units_promised_later,
-           sum(case when status = 'REJECTED' then qty else 0 end)                      as units_rejected,
-           avg(case when status <> 'REJECTED' then promised_lead_days end)             as avg_promised_lead_days
-    from flagged
     group by 1, 2, 3
 ),
 shipped as (
@@ -24,15 +22,16 @@ shipped as (
     group by 1, 2, 3
 )
 select
-    coalesce(p.day, s.day)               as day,
-    coalesce(p.fc_code, s.fc_code)       as fc_code,
-    coalesce(p.channel, s.channel)       as channel,
-    coalesce(p.orders, 0)                as orders,
-    coalesce(p.units_ordered, 0)         as units_ordered,
-    coalesce(p.units_served_from_stock, 0) as units_served_from_stock,
-    coalesce(p.units_promised_later, 0)  as units_promised_later,
-    coalesce(p.units_rejected, 0)        as units_rejected,
-    coalesce(s.units_shipped, 0)         as units_shipped,
+    coalesce(p.day, s.day)                   as day,
+    coalesce(p.fc_code, s.fc_code)           as fc_code,
+    coalesce(p.channel, s.channel)           as channel,
+    coalesce(p.orders, 0)                    as orders,
+    coalesce(p.units_ordered, 0)             as units_ordered,
+    coalesce(p.units_from_stock, 0)          as units_from_stock,
+    coalesce(p.units_scheduled, 0)           as units_scheduled,
+    coalesce(p.units_backordered, 0)         as units_backordered,
+    coalesce(p.units_rejected, 0)            as units_rejected,
+    coalesce(s.units_shipped, 0)             as units_shipped,
     cast(p.avg_promised_lead_days as numeric(6, 1)) as avg_promised_lead_days
 from placed p
 full outer join shipped s on s.day = p.day and s.fc_code = p.fc_code and s.channel = p.channel

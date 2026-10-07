@@ -268,6 +268,27 @@ class OrderFlowIntegrationTest {
     @Order(6)
     void internalApiIsInvisibleWithoutTheTokenAndVisitorsGetACappedLabelledOrder() {
         assertThat(call("/api/internal/orders", order("T-NOTOKEN", "ONLINE", "TEST-ORD", "FC-RIC", 1, null), false).status()).isEqualTo(404);
+        // no route leaks through a wrong method, a ;path-parameter, an encoded ';' or a doubled slash
+        for (String path : new String[] {"/api/internal/notes", "/api/internal;x/notes", "/api/internal%3Bx/notes", "/api//internal/notes", "/api/internal"}) {
+            int get = http.get().uri(java.net.URI.create("http://localhost:" + port + path)).exchange((rq, res) -> res.getStatusCode().value());
+            int post = http.post().uri(java.net.URI.create("http://localhost:" + port + path)).contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("ref", "x", "kind", "PORT", "message", "x")).exchange((rq, res) -> res.getStatusCode().value());
+            assertThat(get).as("GET " + path).isEqualTo(404);
+            assertThat(post).as("POST " + path).isEqualTo(404);
+        }
+        assertThat(jdbc.sql("select count(*) from ops_note where ref = 'x'").query(Long.class).single()).isZero();
+        // nor through an escaped letter decoded with a charset the caller declares (Spring routes with UTF-8)
+        for (String charset : new String[] {"UTF-16", "UTF-32", "IBM037", "ISO-8859-1"}) {
+            MediaType type = MediaType.parseMediaType("application/json; charset=" + charset);
+            String path = "http://localhost:" + port + "/api/%69nternal/notes";
+            int get = http.get().uri(java.net.URI.create(path)).header("Content-Type", type.toString())
+                    .exchange((rq, res) -> res.getStatusCode().value());
+            int post = http.post().uri(java.net.URI.create(path)).contentType(type).body("{\"ref\":\"y\",\"kind\":\"PORT\",\"message\":\"y\"}")
+                    .exchange((rq, res) -> res.getStatusCode().value());
+            assertThat(get).as("GET with charset " + charset).isEqualTo(404);
+            assertThat(post).as("POST with charset " + charset).isEqualTo(404);
+        }
+        assertThat(jdbc.sql("select count(*) from ops_note where ref = 'y'").query(Long.class).single()).isZero();
 
         Response visitor = call("/api/orders", Map.of("sku", "SOFA-3S-OAT", "fc", "FC-RIC", "qty", 1), false);
         assertThat(visitor.status()).isEqualTo(201);
@@ -316,5 +337,50 @@ class OrderFlowIntegrationTest {
         plan.get("proposals").forEach(p -> assertThat(p.get("clientRef").asString()).startsWith("REPL-"));
         assertThat(get("/api/exceptions/shortages").isArray()).isTrue();
         assertThat(get("/api/exceptions").isArray()).isTrue();
+    }
+
+    @Test
+    @Order(9)
+    void aPromiseOnStockDueToBePutAwayTodayHoldsAtTheMorningRunButAnOverdueOneMoves() {
+        if (TODAY.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) return;     // nothing is put away on a Sunday
+        createSku("TEST-DUE", "FC-PAT", 0);
+        LocalDate arrival = TODAY;
+        for (int back = 0; back < 3; ) {                                       // FC-PAT dock-to-stock: 3 working days
+            arrival = arrival.minusDays(1);
+            if (arrival.getDayOfWeek() != java.time.DayOfWeek.SUNDAY) back++;
+        }
+        long poId = jdbc.sql("""
+                insert into purchase_order (po_number, supplier, origin_port, dest_fc_id, status, planned_arrival)
+                select 'PO-T-DUE', 'Test Supplier', 'VNSGN', id, 'OPEN', :arrival from fulfillment_center where code = 'FC-PAT'
+                returning id
+                """).param("arrival", arrival).query(Long.class).single();
+        jdbc.sql("insert into purchase_order_line (po_id, sku_id, qty_ordered, qty_received) select :po, id, 5, 0 from sku where code = 'TEST-DUE'")
+                .param("po", poId).update();
+        jdbc.sql("""
+                insert into shipment (po_id, carrier, container_no, planned_departure, planned_arrival, current_stage)
+                values (:po, 'ONE', 'ONEU0000001', :dep, :arrival, 'RECEIVED_FC')
+                """).param("po", poId).param("dep", arrival.minusDays(30)).param("arrival", arrival).update();
+        long orderId = jdbc.sql("""
+                insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, placed_status, promise_date, first_promise_date)
+                select 'T-DUE', 'ONLINE', 'FEED', sku.id, fc.id, 2, 'BACKORDERED', 'BACKORDERED', :d, :d
+                from sku, fulfillment_center fc where sku.code = 'TEST-DUE' and fc.code = 'FC-PAT'
+                returning id
+                """).param("d", TODAY).query(Long.class).single();
+
+        assertThat(internal("/api/internal/allocation/run", Map.of()).status()).isEqualTo(200);
+        assertThat(jdbc.sql("select promise_date from customer_order where id = :id").param("id", orderId).query(LocalDate.class).single())
+                .as("stock due to be put away today keeps today's promise").isEqualTo(TODAY);
+        assertThat(jdbc.sql("select count(*) from ops_note where ref like :ref").param("ref", "repromise-" + orderId + "-%").query(Long.class).single()).isZero();
+
+        // the same container a working day later than planned (it should have been put away yesterday): now the promise moves
+        LocalDate late = arrival.minusDays(arrival.getDayOfWeek() == java.time.DayOfWeek.MONDAY ? 2 : 1);
+        jdbc.sql("update purchase_order set planned_arrival = :a where id = :po").param("a", late).param("po", poId).update();
+        jdbc.sql("update shipment set planned_arrival = :a where po_id = :po").param("a", late).param("po", poId).update();
+        assertThat(internal("/api/internal/allocation/run", Map.of()).status()).isEqualTo(200);
+        LocalDate next = TODAY.plusDays(TODAY.getDayOfWeek() == java.time.DayOfWeek.SATURDAY ? 2 : 1);
+        assertThat(jdbc.sql("select promise_date from customer_order where id = :id").param("id", orderId).query(LocalDate.class).single())
+                .isEqualTo(next);
+        assertThat(jdbc.sql("select message from ops_note where ref = :ref").param("ref", "repromise-" + orderId + "-" + next).query(String.class).single())
+                .contains("T-DUE").contains("not enough stock or inbound supply for 2 units");
     }
 }

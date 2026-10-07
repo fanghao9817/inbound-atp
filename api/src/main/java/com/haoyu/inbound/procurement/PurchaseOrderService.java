@@ -23,8 +23,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PurchaseOrderService {
 
-    /** Days a carrier pads its quote on top of the lane median. */
-    static final int CARRIER_PADDING_DAYS = 4;
+    /**
+     * Days a carrier pads its quote on top of the lane median (departure to FC): enough that about 87% of
+     * containers arrive by the plan under the simulated transit (departure slips, port delays, congestion,
+     * dock hours) - the same share the seeded history shows.
+     */
+    static final int CARRIER_PADDING_DAYS = 7;
     static final int DEFAULT_TRANSIT_DAYS = 30;
 
     public record NewLine(String sku, int qty) {}

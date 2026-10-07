@@ -16,7 +16,7 @@ the internal token — and has no database access and no state of its own.
   does not wait for a website to come back).
 - **No pile-up at go-live.** Containers already at sea when the simulator took over (`SIM_GO_LIVE`) have their
   next stage drawn conditional on "not before go-live" (rejection sampling over alternative draws). If that
-  fails 20 times the event is spread over the two days after go-live and marked `CARRIER_EDI_RECOVERY`, which
+  fails 200 times the event is spread over the two days after go-live and marked `CARRIER_EDI_RECOVERY`, which
   keeps it out of lane statistics and accuracy scoring.
 - **Secret seed.** `SIM_SEED` lives only in `infra/.env` on the box: with it, anyone could compute when every
   container will arrive, which would make the prediction look better than it is.
@@ -34,22 +34,27 @@ the internal token — and has no database access and no state of its own.
 | Units per order | sofas almost always 1, dining chairs 1–3, bar stools 2–4 | |
 | Conversion | lead ≤ 14 days: 100%; 15–35: 70%; later: 30%; no date: placed and REJECTED | Long promise dates lose customers; lost demand is recorded |
 | B2B | Poisson(1) per weekday, 08:00–12:00, 5–20 units, wanted 3–10 weeks out | Becomes SCHEDULED demand |
-| Booked → departed | 3–7 days | Same distributions as the API's seeded history, so live data matches what dbt learned |
+| Booked → departed | the planned vessel day (5–10 days after booking): on it 75%, 1–3 days late 20%, rolled 4–7 days 5% | The API's seeder uses the same rules, so live data matches what dbt learned |
 | Departed → port | 0.78 × lane median × lognormal(0, 0.15); 10% + 5–12 days | Port delays |
 | Port → customs cleared | 1–4 days; + 7–14 days if the gateway is congested that ISO week (8% of weeks) | Congestion is announced as an ops note |
 | Customs → gate-in | 2–6 days of drayage, then the next dock slot Mon–Sat 07:00–15:00 local | |
 | Gate-in → goods receipt | the FC's dock-to-stock working days, 08:00–16:00 | ≈1% damaged, 2% of lines short-shipped by 1–5 |
+| Reporting lag | carrier EDI and customs 1–6 h after the event, the WMS 5–60 min | Deterministic per container and stage |
 | Shipping | Mon–Sat 07:00–19:00 local, ≥ 2 h after reservation; B2B not before the day before need-by | Sunday closed → Monday backlog |
-| Cancellations | 1% of reservations in their first 24 h; 0.5% of backorders per day | |
+| Cancellations | 1% of new reservations (decided once, at the first hourly tick after the reservation); 0.5% of backorders per day | |
 | Buyer | Mondays 08:00 Vancouver, and once at start-up; next sailing 5–10 days out | Proposals are idempotent per ISO week |
 
 ## Calibration
 
-`CalibrationDryRunTest` runs 26 weeks of this demand against the API's replenishment policy in memory
-(f = observed weekly demand blended with a prior for the first 4 weeks, S = f × (lead time/7 + 1 review week
-+ 2 safety weeks), order S − inventory position in cases of 5). After a 12-week warm-up it must serve 85–99%
-of demand from stock without the median position holding more than 20 weeks of cover. Today it reports a
-fill rate of about 0.97 and a median cover of about 9 weeks.
+`CalibrationDryRunTest` runs 26 weeks of this demand against the API's replenishment policy in memory,
+starting from the state the API's seeder creates: 1.8–3.4 weeks of stock per position (one in twelve
+short), the pipeline of a lane that books one container a week to refill what sold, and a forecast per
+position (true demand ±10%). Policy: f = observed weekly demand blended with the forecast over the first 4
+weeks, S = f × (lead time/7 + 1 review week + 2 safety weeks), order S − inventory position in cases of 5.
+It must serve 85–99% of demand from stock both during the first 12 weeks (the cold start) and after them,
+with no week of the cold start below 70%, and without the median position holding more than 20 weeks of
+cover. Today it reports about 0.96 in both periods (worst cold-start week about 0.89) and a median cover of
+about 8 weeks.
 
 ## Running
 

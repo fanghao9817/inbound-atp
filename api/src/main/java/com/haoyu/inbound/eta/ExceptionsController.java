@@ -55,7 +55,9 @@ class ExceptionsController {
                        (select count(*) from demand_commitment dc
                           join purchase_order_line l on l.po_id = po.id and l.sku_id = dc.sku_id
                          where dc.fc_id = po.dest_fc_id
-                           and dc.need_by < s.predicted_arrival + fc.receiving_buffer_days) as commitments_due_before_arrival
+                           and dc.need_by < s.predicted_arrival + fc.receiving_buffer_days
+                                         -- dock-to-stock in working days: one more day if a Sunday falls in between (buffers up to 6)
+                                         + case when extract(isodow from s.predicted_arrival)::int % 7 + fc.receiving_buffer_days >= 7 then 1 else 0 end) as commitments_due_before_arrival
                 from shipment s
                 join purchase_order po on po.id = s.po_id
                 join fulfillment_center fc on fc.id = po.dest_fc_id

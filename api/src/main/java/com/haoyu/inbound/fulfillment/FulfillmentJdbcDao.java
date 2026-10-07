@@ -1,5 +1,6 @@
 package com.haoyu.inbound.fulfillment;
 
+import com.haoyu.inbound.common.BusinessCalendar;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -115,8 +116,8 @@ public class FulfillmentJdbcDao {
                 while (rs.next()) {
                     // "expected" means sellable: arrival plus the FC's dock-to-stock days, and never before
                     // tomorrow - the same rule as AtpService.sellableFrom, so the two quotes never disagree
-                    LocalDate sellable = rs.getObject("expected_at", LocalDate.class).plusDays(rs.getInt("receiving_buffer_days"));
-                    LocalDate expected = sellable.isAfter(today) ? sellable : today.plusDays(1);
+                    LocalDate sellable = BusinessCalendar.addWorkingDays(rs.getObject("expected_at", LocalDate.class), rs.getInt("receiving_buffer_days"));
+                    LocalDate expected = sellable.isAfter(today) ? sellable : BusinessCalendar.nextWorkingDay(today);
                     lines.add(new InboundLine(
                             rs.getLong("id"),
                             rs.getString("po_number"),
@@ -126,6 +127,9 @@ public class FulfillmentJdbcDao {
                 }
             }
         }
+        // allocate in the order stock becomes sellable: across FCs with different dock-to-stock days the
+        // sellable order can differ from the arrival order the query sorts by (a Sunday in between)
+        lines.sort(java.util.Comparator.comparing(InboundLine::expectedAt).thenComparingLong(InboundLine::purchaseOrderId));
         return lines;
     }
 

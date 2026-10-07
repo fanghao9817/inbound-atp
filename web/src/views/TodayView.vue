@@ -11,7 +11,7 @@ const feed = ref<Activity[]>([])
 const fresh = ref(new Set<string>())
 const error = ref<string | null>(null)
 
-const key = (a: Activity) => `${a.at}|${a.kind}|${a.title}`
+const key = (a: Activity) => a.eventKey
 
 async function loadKpis() {
   try {
@@ -36,7 +36,7 @@ async function loadFeed() {
 usePolling(loadKpis, 30_000)
 usePolling(loadFeed, 10_000)
 
-/** Start of today / this week / last week in Pacific time, to tell whether a comparison period predates the data. */
+/** Start of today / this week / last week in Vancouver time, to tell whether a comparison period predates the data. */
 const periods = computed(() => {
   if (!kpis.value) return null
   const asOf = new Date(kpis.value.asOf)
@@ -65,7 +65,7 @@ const tiles = computed<Tile[]>(() => {
   const noYesterday = before(p.yesterdayStart)
   const noLastWeek = before(p.lastWeekStart)
   const fullWeek = !before(new Date(k.asOf).getTime() - 7 * 86_400_000)   // judge 7-day rates only on 7 days of data
-  const served = k.servedFromStock7d
+  const served = k.onTimeShare7d
   return [
     { label: 'Orders today', value: String(k.ordersToday), delta: delta(k.ordersToday, k.ordersYesterdaySameTime, noYesterday),
       vs: 'vs yesterday by now', sub: `${k.unitsOrderedToday} units` },
@@ -77,9 +77,9 @@ const tiles = computed<Tile[]>(() => {
     { label: 'Containers in this week', value: String(k.containersGatedInWtd),
       delta: delta(k.containersGatedInWtd, k.containersGatedInLastWtd, noLastWeek), vs: 'vs last week by now',
       sub: `${k.unitsReceivedWtd} units put away` },
-    { label: fullWeek ? 'Served from stock, 7 days' : 'Served from stock, since go-live', value: pct(served),
+    { label: fullWeek ? 'Promised on time, 7 days' : 'Promised on time, since go-live', value: pct(served),
       tone: served == null || !fullWeek ? undefined : served >= 0.85 ? 'ok' : served >= 0.7 ? 'warn' : 'bad',
-      sub: `${k.unitsRejected7d} units lost (no date could be promised)` },
+      sub: `online from stock, B2B by its date · ${k.unitsRejected7d} units lost (no date could be promised)` },
     { label: 'Open backorders', value: String(k.openBackorders), tone: k.lateBackorders > 0 ? 'warn' : undefined,
       sub: `${k.lateBackorders} past their promise date · ${k.repromisedToday} re-promised today` },
     { label: 'Containers on the way', value: String(k.openContainers), tone: k.overdueContainers > 0 ? 'warn' : undefined,
@@ -127,7 +127,7 @@ const weekday = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en
         A simulator plays the outside world around the clock through the same API any client would use.
       </p>
     </div>
-    <div class="asof" v-if="kpis"><span class="live-dot" />as of {{ ptClock(kpis.asOf) }} PT
+    <div class="asof" v-if="kpis"><span class="live-dot" />as of {{ ptClock(kpis.asOf) }} Vancouver time
       <div class="muted" v-if="kpis.historySince">live since {{ ptTime(kpis.historySince) }}</div>
     </div>
   </div>
@@ -145,7 +145,7 @@ const weekday = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en
 
   <div class="grid cols-2" style="margin-top: 16px">
     <section class="panel">
-      <h2>Last 28 days <span class="muted" style="font-weight: normal">(business days, Pacific)</span></h2>
+      <h2>Last 28 days <span class="muted" style="font-weight: normal">(business days, Vancouver time)</span></h2>
       <div class="sparks">
         <div v-for="s in series" :key="s.label" class="spark">
           <div class="spark-head"><span>{{ s.label }}</span><b>{{ s.values.at(-1) ?? 0 }}</b><span class="muted">today</span></div>

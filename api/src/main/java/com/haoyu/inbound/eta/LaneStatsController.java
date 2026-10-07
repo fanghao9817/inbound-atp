@@ -11,10 +11,12 @@ class LaneStatsController {
 
     private final LaneStatsRepository laneStats;
     private final RefreshService refresh;
+    private final java.time.Clock clock;
 
-    LaneStatsController(LaneStatsRepository laneStats, RefreshService refresh) {
+    LaneStatsController(LaneStatsRepository laneStats, RefreshService refresh, java.time.Clock clock) {
         this.laneStats = laneStats;
         this.refresh = refresh;
+        this.clock = clock;
     }
 
     /** What dbt computed; empty until the first `dbt run`. */
@@ -23,11 +25,23 @@ class LaneStatsController {
         return laneStats.listAll();
     }
 
-    /** When the last full refresh finished (daily at 00:05 and after each dbt run). */
+    /**
+     * When the last full refresh finished (daily at 00:05 and after each nightly dbt run), and when dbt
+     * last rebuilt the lane statistics - the external watchdog alerts when that is more than a day old.
+     */
     @GetMapping("/api/refresh/last")
     Map<String, Object> last() {
         var s = refresh.last();
-        return s == null ? Map.of() : Map.of("finishedAt", s.finishedAt(), "rescored", s.rescored(), "projected", s.projected());
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        if (s != null) {
+            out.put("finishedAt", s.finishedAt());
+            out.put("rescored", s.rescored());
+            out.put("projected", s.projected());
+        }
+        var computedAt = laneStats.computedAt();
+        out.put("statsComputedAt", computedAt);
+        out.put("statsAgeMinutes", computedAt == null ? null : java.time.Duration.between(computedAt.toInstant(), clock.instant()).toMinutes());
+        return out;
     }
 
     /** After a dbt refresh: re-score every open shipment against the new statistics, then re-project. */

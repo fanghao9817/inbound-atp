@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.temporal.IsoFields;
 import java.util.Map;
@@ -16,11 +17,13 @@ import java.util.SplittableRandom;
  * order and stage always give the same answer. The distributions are the ones the API's demo seeder
  * used to generate a year of history, so live behaviour matches the lane statistics dbt learned:
  * <pre>
- *   BOOKED -> DEPARTED_ORIGIN           3-7 days
+ *   BOOKED -> DEPARTED_ORIGIN           the planned vessel day: on it 75%, 1-3 days late 20%, rolled 4-7 days 5%
+ *                                       (3-7 days after booking if the shipment has no planned departure)
  *   DEPARTED -> ARRIVED_DEST_PORT       0.78 x lane median x lognormal(0, 0.15); 10% stuck 5-12 extra days
  *   ARRIVED -> CUSTOMS_CLEARED          1-4 days, + 7-14 days if the destination port is congested that week
  *   CUSTOMS -> RECEIVED_FC (gate-in)    2-6 days of drayage, then the next dock slot (Mon-Sat 07:00-15:00 FC time)
  *   gate-in -> goods receipt            the FC's dock-to-stock working days, put away 08:00-16:00
+ *   reported                            carrier EDI and customs 1-6 h after the event, the WMS within the hour
  * </pre>
  */
 public final class TransitModel {
@@ -41,7 +44,13 @@ public final class TransitModel {
 
     static final double CONGESTION_WEEKLY_PROBABILITY = 0.08;
 
-    public record Container(String poNumber, String origin, String fc) {}
+    /** @param plannedDeparture the vessel the buyer booked (null if unknown) */
+    public record Container(String poNumber, String origin, String fc, LocalDate plannedDeparture) {
+
+        public Container(String poNumber, String origin, String fc) {
+            this(poNumber, origin, fc, null);
+        }
+    }
 
     private TransitModel() {}
 
@@ -53,7 +62,14 @@ public final class TransitModel {
     public static Instant nextStageTime(String seed, Container c, Stage from, Instant fromTime, int salt) {
         SplittableRandom r = Rng.of(seed, "transit", c.poNumber(), from, salt);
         return switch (from) {
-            case BOOKED -> plusDays(fromTime, 3 + r.nextInt(5), r);
+            case BOOKED -> {
+                if (c.plannedDeparture() == null) yield plusDays(fromTime, 3 + r.nextInt(5), r);
+                double x = r.nextDouble();
+                int late = x < 0.75 ? 0 : x < 0.95 ? 1 + r.nextInt(3) : 4 + r.nextInt(4);
+                Instant sails = c.plannedDeparture().plusDays(late).atStartOfDay(ZoneOffset.UTC).toInstant()
+                        .plus(Duration.ofMinutes(r.nextInt(24 * 60)));
+                yield sails.isAfter(fromTime) ? sails : fromTime.plus(Duration.ofHours(1 + r.nextInt(24)));
+            }
             case DEPARTED_ORIGIN -> {
                 double transit = MEDIAN_DAYS.getOrDefault(c.origin() + "|" + c.fc(), 30.0) * Math.exp(Rng.gaussian(r) * 0.15);
                 int days = (int) Math.max(1, Math.round(transit * 0.78));
@@ -74,16 +90,35 @@ public final class TransitModel {
         };
     }
 
+    /** How long after the event its message reaches us: EDI and the customs broker 1-6 h, the WMS 5-60 min. */
+    public static Duration reportingLag(String seed, Container c, Stage reached) {
+        SplittableRandom r = Rng.of(seed, "lag", c.poNumber(), reached);
+        return reached == Stage.RECEIVED_FC ? Duration.ofMinutes(5 + r.nextInt(55)) : Duration.ofMinutes(60 + r.nextInt(300));
+    }
+
     /** Putaway: the FC's dock-to-stock working days (no Sundays) after gate-in, during the day shift. */
     public static Instant goodsReceiptTime(String seed, Container c, Instant gateIn, int bufferDays) {
+        return goodsReceiptTime(seed, c, gateIn, bufferDays, 0);
+    }
+
+    /** {@code salt} selects an alternative time on the same day (conditioning on go-live, like the stages). */
+    public static Instant goodsReceiptTime(String seed, Container c, Instant gateIn, int bufferDays, int salt) {
         ZoneId zone = FC_ZONE.getOrDefault(c.fc(), ZoneId.of("America/Vancouver"));
         LocalDate d = gateIn.atZone(zone).toLocalDate();
         for (int added = 0; added < bufferDays; ) {
             d = d.plusDays(1);
             if (d.getDayOfWeek() != DayOfWeek.SUNDAY) added++;
         }
-        SplittableRandom r = Rng.of(seed, "grn", c.poNumber());
+        SplittableRandom r = salt == 0 ? Rng.of(seed, "grn", c.poNumber()) : Rng.of(seed, "grn", c.poNumber(), salt);
         return d.atTime(LocalTime.of(8, 0)).plusMinutes(r.nextInt(8 * 60)).atZone(zone).toInstant();
+    }
+
+    /** A put-away time in the first day shift (Mon-Sat 08:00-16:00 FC-local) that starts after {@code after}. */
+    public static Instant nextReceiptShift(String seed, Container c, Instant after) {
+        ZoneId zone = FC_ZONE.getOrDefault(c.fc(), ZoneId.of("America/Vancouver"));
+        LocalDate d = after.atZone(zone).toLocalDate().plusDays(1);
+        if (d.getDayOfWeek() == DayOfWeek.SUNDAY) d = d.plusDays(1);
+        return d.atTime(LocalTime.of(8, 0)).plusMinutes(Rng.of(seed, "grn-late", c.poNumber()).nextInt(8 * 60)).atZone(zone).toInstant();
     }
 
     /** Extra customs dwell for containers reaching this gateway in a congested ISO week (0 most weeks). */

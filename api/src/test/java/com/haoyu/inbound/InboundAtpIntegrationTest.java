@@ -67,7 +67,27 @@ class InboundAtpIntegrationTest {
         // other test classes share this database and may add test SKUs, so assert on the seeded ones
         assertThat(get("/api/skus").findValues("code").stream().map(JsonNode::asString)).contains("SOFA-3S-OAT", "DESK-STD-WAL");
         assertThat(get("/api/fulfillment-centers")).hasSize(4);
-        assertThat(get("/api/purchase-orders?status=OPEN").size()).isBetween(30, 36);
+        // a year of weekly containers per lane: dozens still on the way, hundreds received
+        assertThat(get("/api/purchase-orders?status=OPEN").size()).isBetween(50, 140);
+        assertThat(jdbc.sql("select count(*) from purchase_order where status = 'RECEIVED'").query(Long.class).single()).isGreaterThan(450);
+        // seeded B2B/store demand went through the order decision: nothing promised that ATP cannot keep
+        assertThat(jdbc.sql("select count(*) from customer_order where origin = 'SEED'").query(Long.class).single()).isEqualTo(20);
+        assertThat(jdbc.sql("select count(*) from customer_order where origin = 'SEED' and status = 'REJECTED'").query(Long.class).single()).isZero();
+        post("/api/internal/allocation/run", Map.of());
+        assertThat(jdbc.sql("""
+                select count(*) from ops_note where kind = 'PROMISE'
+                and (message like 'B2B-%' or message like 'TRADE-%' or message like 'PROMO-%' or message like 'STORE-%')
+                """).query(Long.class).single()).as("no seeded promise needs moving").isZero();
+        // the opening stock matches demand: few positions are out, and a forecast exists for every position
+        assertThat(jdbc.sql("""
+                select count(*) from inventory_position p join sku on sku.id = p.sku_id
+                where sku.code not like 'TEST-%' and p.on_hand - p.reserved <= 0
+                """).query(Long.class).single()).isLessThanOrEqualTo(10);
+        assertThat(jdbc.sql("select count(*) from demand_forecast").query(Long.class).single()).isEqualTo(48);
+        // and the first replenishment run tops up rather than rebuilds: under two weeks of network demand
+        int proposed = 0;
+        for (JsonNode p : get("/api/planning/replenishment").get("proposals")) for (JsonNode l : p.get("lines")) proposed += l.get("qty").asInt();
+        assertThat(proposed).isLessThan(1500);
         assertThat(get("/actuator/health").get("status").asString()).isEqualTo("UP");
         // the seeder projects every SKU x FC once the data is in
         assertThat(sink.batches).anySatisfy(b -> {

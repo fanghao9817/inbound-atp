@@ -20,7 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Weekly replenishment, periodic review with an order-up-to level, per SKU x FC:
  * <pre>
  *   f  weekly demand  = units ordered by the live feed in the last min(d, 28) days, per week;
- *                       while d &lt; 28 days of history exist it is blended with a prior (cold start)
+ *                       while d &lt; 28 days of history exist it is blended with the position's
+ *                       forecast (demand_forecast, fitted on last year's sales; cold start)
  *   L  lead time      = lane P50 BOOKED -> RECEIVED_FC (dbt) + the FC's dock-to-stock days
  *   S  order-up-to    = f x (L in weeks + 1 review week + 2 safety weeks)
  *   IP position       = available now + open PO outstanding - open commitments (scheduled + backordered)
@@ -47,15 +48,16 @@ public class ReplenishmentService {
 
     public record Proposal(String clientRef, String supplier, String originPort, String destFc, List<ProposedLine> lines) {}
 
-    public record Plan(LocalDate asOf, double daysOfHistory, double priorWeeklyUnits, List<Line> lines, List<Proposal> proposals) {}
+    /** @param fallbackPriorWeeklyUnits the cold-start prior for positions without a demand_forecast row */
+    public record Plan(LocalDate asOf, double daysOfHistory, double fallbackPriorWeeklyUnits, List<Line> lines, List<Proposal> proposals) {}
 
     private record Row(String sku, String fc, String originPort, String supplier, int receivingBufferDays, int unitsInWindow,
-                       int availableNow, int inbound, int committed) {}
+                       int availableNow, int inbound, int committed, double forecast) {}
 
     private final JdbcClient jdbc;
     private final LaneStatsRepository laneStats;
     private final Clock clock;
-    private final double priorWeeklyUnits;
+    private final double priorWeeklyUnits;   // only for positions without a forecast
 
     public ReplenishmentService(JdbcClient jdbc, LaneStatsRepository laneStats, Clock clock,
                                 @Value("${app.planning.prior-weekly-units:14}") double priorWeeklyUnits) {
@@ -88,7 +90,8 @@ public class ReplenishmentService {
                        coalesce(d.units, 0) as units_in_window,
                        ip.on_hand - ip.reserved as available_now,
                        coalesce(i.units, 0) as inbound,
-                       coalesce(c.units, 0) as committed
+                       coalesce(c.units, 0) as committed,
+                       coalesce(fcst.weekly_units, :prior) as forecast
                 from inventory_position ip
                 join sku on sku.id = ip.sku_id
                 join sku_source src on src.sku_id = ip.sku_id
@@ -96,9 +99,11 @@ public class ReplenishmentService {
                 left join demand d on d.sku_id = ip.sku_id and d.fc_id = ip.fc_id
                 left join inbound i on i.sku_id = ip.sku_id and i.fc_id = ip.fc_id
                 left join committed c on c.sku_id = ip.sku_id and c.fc_id = ip.fc_id
+                left join demand_forecast fcst on fcst.sku_id = ip.sku_id and fcst.fc_id = ip.fc_id
                 order by sku.code, fc.code
                 """)
                 .param("window", window)
+                .param("prior", priorWeeklyUnits)
                 .query(Row.class)
                 .list();
 
@@ -107,7 +112,7 @@ public class ReplenishmentService {
                     .map(s -> (int) Math.ceil(s.p50Days().doubleValue()))
                     .orElse(DEFAULT_LEAD_DAYS - r.receivingBufferDays()) + r.receivingBufferDays();
             return evaluate(r.sku(), r.fc(), r.originPort(), r.supplier(), r.unitsInWindow(), Math.min(d, HISTORY_DAYS),
-                    priorWeeklyUnits, lead, r.availableNow(), r.inbound(), r.committed());
+                    r.forecast(), lead, r.availableNow(), r.inbound(), r.committed());
         }).sorted(Comparator.comparingDouble(Line::weeksOfCover)).toList();
 
         LocalDate today = LocalDate.now(clock);

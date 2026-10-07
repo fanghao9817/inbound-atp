@@ -20,7 +20,7 @@ public class OrderRepository {
             """;
 
     private static final String VIEW_SELECT = """
-            select o.id, o.order_ref, o.channel, o.origin, sku.code as sku, fc.code as fc, o.qty, o.status, o.promise_date,
+            select o.id, o.order_ref, o.channel, o.origin, sku.code as sku, fc.code as fc, o.qty, o.status, o.placed_status, o.promise_date,
                    o.first_promise_date, o.need_by, o.created_at, o.reserved_at, o.shipped_at, o.cancelled_at
             from customer_order o
             join sku on sku.id = o.sku_id
@@ -36,8 +36,9 @@ public class OrderRepository {
     public long insert(String orderRef, Channel channel, Origin origin, long skuId, long fcId, int qty, OrderStatus status,
                        LocalDate promiseDate, LocalDate needBy, boolean reservedNow) {
         return jdbc.sql("""
-                insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, promise_date, first_promise_date, need_by, reserved_at)
-                values (:ref, :channel, :origin, :sku, :fc, :qty, :status, :promise, :promise, :needBy, case when :reservedNow then now() end)
+                insert into customer_order (order_ref, channel, origin, sku_id, fc_id, qty, status, placed_status, promise_date, first_promise_date,
+                                            need_by, reserved_at)
+                values (:ref, :channel, :origin, :sku, :fc, :qty, :status, :status, :promise, :promise, :needBy, case when :reservedNow then now() end)
                 returning id
                 """)
                 .param("ref", orderRef).param("channel", channel.name()).param("origin", origin.name()).param("sku", skuId).param("fc", fcId)

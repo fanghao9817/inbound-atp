@@ -50,7 +50,7 @@ async function runPreview() {
   preview.value = null
   previewError.value = null
   try {
-    const occurredAt = new Date(`${previewAt.value}T12:00:00-07:00`).toISOString()
+    const occurredAt = new Date(`${previewAt.value}T12:00:00-07:00`).toISOString()   // noon in Vancouver
     preview.value = await api.etaPreview(selected.value.shipment.id, { type: previewType.value, occurredAt })
   } catch (e) {
     previewError.value = e instanceof ApiError ? e.detail : String(e)
@@ -125,7 +125,7 @@ const lagHours = (m: { occurredAt: string; recordedAt: string }) =>
           </tbody>
         </table>
       </div>
-      <p class="note">Lag = how long after the event the message reached us. EDI typically arrives hours late; the prediction uses when it happened.</p>
+      <p class="note">Times in Vancouver time. Lag = how long after the event the message reached us: carrier EDI and customs typically hours, the warehouse within the hour. The prediction uses when it happened.</p>
 
       <template v-if="selected.shipment.currentStage !== 'RECEIVED_FC'">
         <h2 style="margin-top: 14px">What if…</h2>

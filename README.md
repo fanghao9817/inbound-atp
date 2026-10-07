@@ -65,21 +65,30 @@ Design decisions worth asking about:
 - **Stock has a ledger.** Every change to a position writes one `inventory_movement` row in the same transaction;
   a dbt test checks that the ledger sums to the positions, and a constraint keeps `reserved ≤ on_hand`.
 - **Gate-in is not stock.** `RECEIVED_FC` means the container is at the dock; stock becomes sellable when the
-  warehouse posts the goods receipt (idempotent on its event id), the same dock-to-stock days ATP promises with.
+  warehouse posts the goods receipt (idempotent on its event id), the same dock-to-stock working days (no
+  Sundays) ATP promises with. Inbound stock is never promised before the next working day, but a promise that
+  rests on stock due to be put away today is not moved at the 06:00 commitment run: the receipt reserves it
+  later that day.
 - **ATP takes the look-ahead minimum.** Stock that looks free on day 10 may be spoken for by a commitment due on
   day 20; the naive projection over-promises. `AtpCalculator` is a pure function with table-driven unit tests.
 - **Promise on P80, not on the mean.** Confidence grows with sample size and with how far along the container is.
   A container past its predicted date drops to LOW confidence and is re-predicted from today, not left stale.
-- **Accuracy is measured honestly.** Every prediction is logged; a container is scored against the prediction that
-  was in force 14 days before it actually arrived (`eta_accuracy`, and the P80 tile on the Today page).
+- **Accuracy is measured honestly.** Every change of prediction is logged; a container is scored against the
+  prediction that was in force 14 days before it actually arrived (`eta_accuracy`, and the P80 tile on the Today page).
 - **Transactional outbox.** Events are written in the same transaction as the change and relayed to Kafka in
   order; consumers recompute from the database, so a duplicate or replayed event is harmless. Poison messages go
   to a dead-letter topic after retries with back-off.
 - **The storefront never reads the operational database.** Availability is projected into DynamoDB by a Lambda;
   writes are conditional on a numeric `updatedAtMs`, so replays and out-of-order invocations cannot regress a row.
 - **Writes are internal.** Everything that changes the world is under `/api/internal/**`, needs a token, and does
-  not exist from the internet. The public API is reads, a what-if ETA preview that records nothing, and a capped
-  visitor order form (≤ 5 units, left out of the KPIs, cancelled after an hour).
+  not exist from the internet: nginx answers 404 for any spelling of the path, and a servlet filter in front of
+  Spring MVC answers the same bare 404 for any method without the token. The public API is reads, a what-if ETA
+  preview that records nothing, and a capped visitor order form (≤ 5 units, left out of the KPIs, cancelled after an hour).
+- **A year of history that matches the live rules.** The seeder books one container a week per lane to refill what
+  sold, moves it with the same transit rules the simulator uses (sailing on the planned vessel, port delays,
+  congestion weeks, dock hours, working-day put-away, EDI lag), and opens with two to three weeks of stock per
+  position and a per-position forecast for the replenishment cold start. So the network starts balanced instead
+  of spending its first two months recovering from a random opening.
 - **No long-lived cloud keys in CI.** GitHub Actions assumes a deploy role through OIDC; deploys run only after a
   green CI on a push to `main`, check out exactly that commit, and connect to the box with pinned host keys.
 
@@ -95,9 +104,9 @@ keeps the network healthy (fill rate 85–99%, no runaway stock) at the configur
 |---|---|---|
 | Online customers | Poisson per FC per hour; evenings ×1.8, Sundays ×1.2, Black Friday up to ×1.3 | Ask for a date first; buy if it is within 2 weeks, 70% of them if 2–5 weeks, 30% beyond; no date at all → lost demand (REJECTED) |
 | B2B customers | about one per weekday morning | 5–20 units wanted 3–10 weeks out → SCHEDULED, reserved 2 days before |
-| Carriers, customs | every 5 minutes | Each container's next milestone at its true time, from the lane's transit distribution; 10% stuck at port; about one week in twelve a gateway is congested |
-| Warehouse | Mon–Sat 07:00–19:00 local | Gate-in in dock hours; goods receipt after the FC's dock-to-stock days (≈1% damaged, occasional short shipment); ships reserved orders after 2 h of picking |
-| Cancellations | hourly | 1% of new reservations in their first day; 0.5% of backorders per day |
+| Carriers, customs | every 5 minutes | Containers sail on their planned vessel (75%) or 1–7 days late; each next milestone at its true time from the lane's transit distribution, reported 1–6 h later (EDI lag); 10% stuck at port; about one week in twelve a gateway is congested |
+| Warehouse | Mon–Sat 07:00–19:00 local | Gate-in in dock hours (07:00–15:00); goods receipt after the FC's dock-to-stock working days (≈1% damaged, occasional short shipment); ships reserved orders after 2 h of picking |
+| Cancellations | hourly | 1% of new reservations; 0.5% of backorders per day while they wait |
 | Buyer | Mondays 08:00 Vancouver | Places the API's replenishment proposals as purchase orders |
 
 ## Running it
@@ -168,5 +177,9 @@ Internal (`X-Internal-Token`, box network only): `POST /api/internal/orders`, `�
   projection and its read path are on AWS. Cost: the box ($44/month) is almost everything; DynamoDB, Lambda and
   CloudFormation stay in the AWS free tier, Databricks runs on the Free Edition.
 - The P80 accuracy tile needs a few weeks of live history after a reset before it has anything to score.
+- Monitoring is a GitHub Actions watchdog scheduled hourly, which GitHub runs best-effort (in practice every
+  few hours) and disables after 60 days without a commit to the repository.
+- Time zones follow the installed tz database. tzdata 2026c moves Alberta to permanent UTC-6 from November 2026;
+  the JDK and PostgreSQL images in use carry 2026b, so the simulated Calgary FC keeps UTC-7 until they update.
 - Business time is Vancouver. tzdata 2026b keeps British Columbia on UTC-7 all year from November 2026; the
   API, PostgreSQL and the browser format all follow the installed tz database.

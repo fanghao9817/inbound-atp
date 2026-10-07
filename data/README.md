@@ -5,7 +5,7 @@ Models over the API's operational tables (schema `public`, owned by Flyway), bui
 | Model | What it is |
 |---|---|
 | `lane_lead_time_stats` | P50/P80 days from each stage to FC receipt, per lane, last 365 days. **The API reads this table** to predict arrivals. |
-| `orders_daily` | Live demand per business day (Vancouver), FC and channel: units ordered, served from stock, promised from inbound, rejected, shipped. |
+| `orders_daily` | Live demand per business day (Vancouver), FC and channel, by the decision taken when each order was placed: from stock, scheduled for the requested date, backordered, rejected; plus units shipped. |
 | `inventory_movements_daily` | The append-only stock ledger rolled up per day, FC, SKU and kind (RECEIPT, RESERVE, SHIP, ...). |
 | `eta_accuracy`, `eta_accuracy_by_lane` | Each received container's prediction as it stood 14 days before arrival vs the real arrival; P80 hit rate per lane. |
 

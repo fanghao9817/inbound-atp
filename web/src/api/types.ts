@@ -51,12 +51,14 @@ export interface Shortage {
 }
 export interface LaneStats { originPort: string; destFcCode: string; fromStage: Stage; toStage: Stage; p50Days: number; p80Days: number; sampleN: number }
 export interface RecalcSummary { shipments: number; changed: number; failed: number }
-export interface RefreshSummary { finishedAt?: string; rescored?: RecalcSummary; projected?: number }
+export interface RefreshSummary { finishedAt?: string; rescored?: RecalcSummary; projected?: number; statsComputedAt?: string }
 
 export type OrderStatus = 'RESERVED' | 'SCHEDULED' | 'BACKORDERED' | 'SHIPPED' | 'CANCELLED' | 'REJECTED'
 export interface OrderView {
   id: number; orderRef: string; channel: 'ONLINE' | 'B2B' | 'STORE'; origin: 'FEED' | 'VISITOR' | 'SEED' | 'MIGRATED'
-  sku: string; fc: string; qty: number; status: OrderStatus; promiseDate?: string; firstPromiseDate?: string; needBy?: string
+  sku: string; fc: string; qty: number; status: OrderStatus
+  /** the decision taken when the order was placed */
+  placedStatus: 'RESERVED' | 'SCHEDULED' | 'BACKORDERED' | 'REJECTED'; promiseDate?: string; firstPromiseDate?: string; needBy?: string
   createdAt: string; reservedAt?: string; shippedAt?: string; cancelledAt?: string
 }
 
@@ -68,13 +70,15 @@ export interface Kpis {
   unitsShippedToday: number; unitsShippedYesterdaySameTime: number; unitsShippedWtd: number; unitsShippedLastWtd: number
   containersGatedInWtd: number; containersGatedInLastWtd: number; unitsReceivedWtd: number; unitsReceivedLastWtd: number
   awaitingShipment: number; scheduledOrders: number; openBackorders: number; lateBackorders: number
-  ordersRejected7d: number; unitsRejected7d: number; servedFromStock7d?: number
+  ordersRejected7d: number; unitsRejected7d: number
+  /** share of orders whose first promise met the requested date: today online, the need-by date for B2B */
+  onTimeShare7d?: number
   repromisedToday: number; etaChangesToday: number; lateContainers: number; overdueContainers: number; openContainers: number
   p80HitRate28d?: number; predictionsScored28d: number; meanAbsErrorDays28d?: number
   minutesSinceLastMilestone?: number; minutesSinceLastOrder?: number; outboxPending: number; outboxOldestSeconds?: number
 }
 export interface Day { day: string; orders: number; unitsOrdered: number; unitsShipped: number; unitsReceived: number; backordersCreated: number; rejected: number }
-export interface Activity { at: string; kind: string; title: string; detail: string }
+export interface Activity { eventKey: string; at: string; kind: string; title: string; detail: string }
 
 export interface AppConfig { availabilityUrl: string; projectionEnabled: boolean }
 /** Row served by the storefront Lambda (DynamoDB projection). */

@@ -20,8 +20,9 @@ import org.springframework.stereotype.Component;
  * hours after reservation (picking), and B2B orders are not shipped before the day before they are
  * wanted. Sunday is closed, which is why Monday starts with a backlog.
  *
- * <p>Cancellations are a hazard, decided per order per hour from the seed: a reserved order cancels
- * with probability 1% over its first 24 hours, a backordered one 0.5% per day while it waits.
+ * <p>Cancellations are decided from the seed: 1% of new reservations are cancelled (decided once, at
+ * the first hourly tick after the reservation), and a backordered order cancels with 0.5% per day
+ * while it waits.
  */
 @Component
 class Warehouse {
@@ -71,16 +72,19 @@ class Warehouse {
         Instant hour = now.truncatedTo(ChronoUnit.HOURS);
         int cancelled = 0;
         try {
-            for (String status : new String[] {"RESERVED", "BACKORDERED"}) {
-                for (ApiClient.Order o : api.orders(status)) {
-                    if (!"FEED".equals(o.origin())) continue;
-                    double p = status.equals("RESERVED")
-                            ? (o.createdAt().toInstant().isAfter(now.minus(Duration.ofHours(24))) ? 0.01 / 24 : 0)
-                            : 0.005 / 24;
-                    if (p > 0 && Rng.of(props.seed(), "cancel", o.orderRef(), hour).nextDouble() < p) {
-                        if (api.cancel(o.id()) < 300) cancelled++;
-                    }
-                }
+            // a new reservation is decided once, at the first hourly tick after it: 1% change their mind
+            // (picking takes at least two hours, so every reservation is still RESERVED at that tick)
+            for (ApiClient.Order o : api.orders("RESERVED")) {
+                if (!"FEED".equals(o.origin()) || o.reservedAt() == null) continue;
+                Instant reserved = o.reservedAt().toInstant();
+                if (reserved.isAfter(now.minus(Duration.ofHours(1))) && !reserved.isAfter(now)
+                        && Rng.of(props.seed(), "cancel", o.orderRef()).nextDouble() < 0.01
+                        && api.cancel(o.id()) < 300) cancelled++;
+            }
+            // a backorder is a standing risk: 0.5% per day it keeps waiting
+            for (ApiClient.Order o : api.orders("BACKORDERED")) {
+                if ("FEED".equals(o.origin()) && Rng.of(props.seed(), "cancel", o.orderRef(), hour).nextDouble() < 0.005 / 24
+                        && api.cancel(o.id()) < 300) cancelled++;
             }
         } catch (RuntimeException e) {
             log.warn("cancellation tick failed: {}", e.toString());

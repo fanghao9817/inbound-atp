@@ -5,4 +5,5 @@ WORKDIR /app
 COPY target/inbound-atp-api-*.jar app.jar
 USER app
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-XX:+UseSerialGC", "-jar", "app.jar"]
+# exit (and let Docker restart the container) on OutOfMemoryError instead of limping on half-broken
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", "-jar", "app.jar"]
