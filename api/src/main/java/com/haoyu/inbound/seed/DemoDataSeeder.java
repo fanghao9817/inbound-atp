@@ -397,10 +397,15 @@ class DemoDataSeeder implements CommandLineRunner {
             }
             var placed = orders.place(new OrderService.PlaceOrder(prefix + "-" + (1000 + i),
                     "STORE".equals(prefix) ? Channel.STORE : Channel.B2B, Origin.SEED, sku, fc,
-                    5 + rnd.nextInt(16), today.plusDays(14 + rnd.nextInt(43))));
+                    5 + rnd.nextInt(16), workingDayOnOrAfter(today.plusDays(14 + rnd.nextInt(43)))));
             outcome.merge(placed.order().status(), 1, Integer::sum);
         }
         log.info("seeded B2B/store demand: {}", outcome);
+    }
+
+    /** B2B customers ask for a day the FCs work: a Sunday becomes the Monday after. */
+    static LocalDate workingDayOnOrAfter(LocalDate d) {
+        return d.getDayOfWeek() == DayOfWeek.SUNDAY ? d.plusDays(1) : d;
     }
 
     private static long generatedId(PreparedStatement ps) throws SQLException {

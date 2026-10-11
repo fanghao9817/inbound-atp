@@ -6,6 +6,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,10 +85,18 @@ class InboundAtpIntegrationTest {
                 where sku.code not like 'TEST-%' and p.on_hand - p.reserved <= 0
                 """).query(Long.class).single()).isLessThanOrEqualTo(10);
         assertThat(jdbc.sql("select count(*) from demand_forecast").query(Long.class).single()).isEqualTo(48);
-        // and the first replenishment run tops up rather than rebuilds: under two weeks of network demand
-        int proposed = 0;
-        for (JsonNode p : get("/api/planning/replenishment").get("proposals")) for (JsonNode l : p.get("lines")) proposed += l.get("qty").asInt();
-        assertThat(proposed).isLessThan(1500);
+        // and every position's stock plus pipeline covers 2.5-20 weeks of its forecast: no position starts out
+        // starved or buried (a random opening fails both ends). Independent of the weekday the seed lands on
+        // and of lane statistics, which tests don't have.
+        List<Double> cover = jdbc.sql("""
+                select (p.on_hand - p.reserved + coalesce(i.units, 0)) / f.weekly_units
+                from inventory_position p
+                join demand_forecast f on f.sku_id = p.sku_id and f.fc_id = p.fc_id
+                left join (select l.sku_id, po.dest_fc_id as fc_id, sum(l.qty_ordered - l.qty_received) as units
+                           from purchase_order_line l join purchase_order po on po.id = l.po_id
+                           where po.status = 'OPEN' group by 1, 2) i on i.sku_id = p.sku_id and i.fc_id = p.fc_id
+                """).query(Double.class).list();
+        assertThat(cover).hasSize(48).allSatisfy(weeks -> assertThat(weeks).isBetween(2.5, 20.0));
         assertThat(get("/actuator/health").get("status").asString()).isEqualTo("UP");
         // the seeder projects every SKU x FC once the data is in
         assertThat(sink.batches).anySatisfy(b -> {

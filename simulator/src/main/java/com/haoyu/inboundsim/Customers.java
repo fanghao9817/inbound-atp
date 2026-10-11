@@ -98,7 +98,7 @@ class Customers {
 
     /**
      * B2B: Poisson(1) orders per weekday, placed between 08:00 and 12:00 Vancouver time, 5-20 units,
-     * wanted 3-10 weeks out (so most become SCHEDULED demand).
+     * wanted 3-10 weeks out on a day the FCs work (a Sunday moves to Monday), so most become SCHEDULED demand.
      */
     @Scheduled(fixedDelay = 300_000, initialDelay = 45_000)
     void b2b() {
@@ -118,7 +118,9 @@ class Customers {
                 if (at.isBefore(now.minus(Duration.ofHours(1)))) continue;
                 String sku = DemandModel.pickSku(r);
                 DemandModel.Fc fc = DemandModel.pickFc(r);
-                api.order(ref, "B2B", sku, fc.code(), 5 + r.nextInt(16), today.plusDays(21 + r.nextInt(50)));
+                LocalDate needBy = today.plusDays(21 + r.nextInt(50));
+                if (needBy.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) needBy = needBy.plusDays(1);   // the FCs are closed on Sunday
+                api.order(ref, "B2B", sku, fc.code(), 5 + r.nextInt(16), needBy);
                 log.info("B2B order {} placed", ref);
             }
         } catch (RuntimeException e) {

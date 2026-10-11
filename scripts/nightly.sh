@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run ON the server by inbound-nightly.timer (00:30 Vancouver), after the API's own 00:05 ETA refresh.
+# Run ON the server by inbound-nightly.timer (00:30 Vancouver), after the API's own just-after-midnight ETA refresh.
 # Backup, rebuild and test the dbt models on the day's data, republish the lineage docs, re-score open
 # containers with the new lane statistics, check the feeds are fresh. A failing step does not stop the
 # later ones; the unit fails at the end (journalctl -u inbound-nightly).

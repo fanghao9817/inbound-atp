@@ -26,7 +26,7 @@ class LaneStatsController {
     }
 
     /**
-     * When the last full refresh finished (daily at 00:05 and after each nightly dbt run), and when dbt
+     * When the last full refresh finished (daily just after midnight and after each nightly dbt run), and when dbt
      * last rebuilt the lane statistics - the external watchdog alerts when that is more than a day old.
      */
     @GetMapping("/api/refresh/last")

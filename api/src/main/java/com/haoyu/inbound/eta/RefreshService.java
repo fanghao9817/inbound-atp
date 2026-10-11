@@ -35,7 +35,12 @@ public class RefreshService {
         this.clock = clock;
     }
 
-    @Scheduled(cron = "0 5 0 * * *", zone = "America/Vancouver")
+    /**
+     * Just after midnight, Vancouver time: a new business day changes what "today" means for every
+     * prediction and every promise. The storefront rows say "available today" with a date, so they are
+     * re-projected within seconds of the date changing (at 00:05 they showed yesterday for five minutes).
+     */
+    @Scheduled(cron = "5 0 0 * * *", zone = "America/Vancouver")
     void daily() {
         Summary s = refresh(EtaRecalculationService.Reason.DAILY);
         log.info("daily refresh: {} containers re-scored ({} changed, {} failed), {} storefront rows projected",

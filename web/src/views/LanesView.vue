@@ -37,7 +37,7 @@ onMounted(load)
       open containers last re-scored {{ ptTime(last.finishedAt) }}<template v-if="last.rescored">
       ({{ last.rescored.shipments }} scored, {{ last.rescored.changed }} predictions changed)</template>
     </span>
-    <span class="muted" v-else>re-scored daily at 00:05 Vancouver time and after each nightly dbt build</span>
+    <span class="muted" v-else>re-scored daily just after midnight Vancouver time and after each nightly dbt build</span>
     <span v-if="error" class="error">{{ error }}</span>
   </div>
   <section class="panel table-wrap">
