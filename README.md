@@ -107,7 +107,7 @@ keeps the network healthy (fill rate 85–99%, no runaway stock) at the configur
 | Carriers, customs | every 5 minutes | Containers sail on their planned vessel (75%) or 1–7 days late; each next milestone at its true time from the lane's transit distribution, reported 1–6 h later (EDI lag); 10% stuck at port; about one week in twelve a gateway is congested |
 | Warehouse | Mon–Sat 07:00–19:00 local | Gate-in in dock hours (07:00–15:00); goods receipt after the FC's dock-to-stock working days (≈1% damaged, occasional short shipment); ships reserved orders after 2 h of picking |
 | Cancellations | hourly | 1% of new reservations; 0.5% of backorders per day while they wait |
-| Buyer | Mondays 08:00 Vancouver | Places the API's replenishment proposals as purchase orders |
+| Buyer | Mondays 08:00 Vancouver | Places the API's replenishment proposals as purchase orders; a start-up catches up only a missed Monday |
 
 ## Running it
 

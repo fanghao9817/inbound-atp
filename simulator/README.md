@@ -42,7 +42,7 @@ the internal token — and has no database access and no state of its own.
 | Reporting lag | carrier EDI and customs 1–6 h after the event, the WMS 5–60 min | Deterministic per container and stage |
 | Shipping | Mon–Sat 07:00–19:00 local, ≥ 2 h after reservation; B2B not before the day before need-by | Sunday closed → Monday backlog |
 | Cancellations | 1% of new reservations (decided once, at the first hourly tick after the reservation); 0.5% of backorders per day | |
-| Buyer | Mondays 08:00 Vancouver, and once at start-up; next sailing 5–10 days out | Proposals are idempotent per ISO week |
+| Buyer | Mondays 08:00 Vancouver; at start-up only if this ISO week has no buying run yet; next sailing 5–10 days out | Proposals are idempotent per ISO week |
 
 ## Calibration
 

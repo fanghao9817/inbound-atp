@@ -22,7 +22,7 @@ public class ApiClient {
     public record Line(String skuCode, int qtyOrdered, int qtyReceived) {}
 
     public record PurchaseOrder(long id, String poNumber, String supplier, String originPort, String destFc, String status,
-                                Long shipmentId, String currentStage, List<Line> lines) {}
+                                String clientRef, Long shipmentId, String currentStage, List<Line> lines) {}
 
     public record Milestone(String type, OffsetDateTime occurredAt, OffsetDateTime recordedAt, String source) {}
 

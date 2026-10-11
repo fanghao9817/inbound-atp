@@ -14,9 +14,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * The buyer: every Monday at 08:00 Vancouver time it takes the API's replenishment proposals and places
- * them as purchase orders, sailing on the next weekly departure 5-10 days out. It also runs once at
- * start-up; the proposals' clientRef (REPL-{week}-{origin}-{FC}) makes a second submission in the same
- * week a no-op. And it relays port-congestion notices (one per gateway per congested week).
+ * them as purchase orders, sailing on the next weekly departure 5-10 days out. At start-up it catches up
+ * only if this ISO week has no buying run yet (first go-live, or the simulator was down on Monday
+ * morning) - a restart mid-week must not add an off-cycle round of orders. The proposals' clientRef
+ * (REPL-{week}-{origin}-{FC}) keeps any repeat within a week idempotent. It also relays port-congestion
+ * notices (one per gateway per congested week).
  */
 @Component
 class Buyer {
@@ -37,7 +39,21 @@ class Buyer {
 
     @EventListener(ApplicationReadyEvent.class)
     void atStartup() {
-        replenish();
+        if (props.enabled()) {
+            try {
+                LocalDate today = LocalDate.now(clock.withZone(HQ));
+                String week = "REPL-%dW%02d-".formatted(today.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR),
+                        today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR));
+                boolean ranThisWeek = api.openPurchaseOrders().stream().anyMatch(po -> po.clientRef() != null && po.clientRef().startsWith(week));
+                boolean beforeMondayRun = today.getDayOfWeek() == java.time.DayOfWeek.MONDAY
+                        && java.time.LocalTime.now(clock.withZone(HQ)).isBefore(java.time.LocalTime.of(8, 0));
+                if (ranThisWeek) log.info("buyer: this week's buying run already happened, nothing to catch up");
+                else if (beforeMondayRun) log.info("buyer: this week's run is due at 08:00, not catching up early");
+                else replenish();
+            } catch (RuntimeException e) {
+                log.warn("buyer start-up check failed: {}", e.toString());
+            }
+        }
         congestionNotices();
     }
 

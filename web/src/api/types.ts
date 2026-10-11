@@ -25,7 +25,7 @@ export interface FulfillmentResponse {
 
 export interface LineView { skuCode: string; skuName: string; qtyOrdered: number; qtyReceived: number }
 export interface PurchaseOrderView {
-  id: number; poNumber: string; supplier: string; originPort: string; destFc: string; status: string; plannedArrival: string
+  id: number; poNumber: string; supplier: string; originPort: string; destFc: string; status: string; clientRef?: string; plannedArrival: string
   shipmentId?: number; carrier?: string; containerNo?: string; currentStage?: Stage; predictedArrival?: string
   predictedConfidence?: Confidence; predictionBasis?: string; daysLate?: number; lines: LineView[]
 }

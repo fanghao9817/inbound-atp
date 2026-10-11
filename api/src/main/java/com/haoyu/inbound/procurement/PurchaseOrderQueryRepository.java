@@ -16,8 +16,9 @@ public class PurchaseOrderQueryRepository {
 
     public record LineView(String skuCode, String skuName, int qtyOrdered, int qtyReceived) {}
 
+    /** @param clientRef the buyer's idempotency key (REPL-{week}-{origin}-{FC}); null for seeded POs */
     public record PurchaseOrderView(long id, String poNumber, String supplier, String originPort, String destFc,
-                                    String status, LocalDate plannedArrival, Long shipmentId, String carrier,
+                                    String status, String clientRef, LocalDate plannedArrival, Long shipmentId, String carrier,
                                     String containerNo, String currentStage, LocalDate predictedArrival,
                                     String predictedConfidence, String predictionBasis, Integer daysLate,
                                     List<LineView> lines) {}
@@ -40,7 +41,7 @@ public class PurchaseOrderQueryRepository {
                              po.planned_arrival desc, po.id desc
                     limit :limit
                 )
-                select po.id, po.po_number, po.supplier, po.origin_port, fc.code as dest_fc, po.status, po.planned_arrival,
+                select po.id, po.po_number, po.supplier, po.origin_port, fc.code as dest_fc, po.status, po.client_ref, po.planned_arrival,
                        s.id as shipment_id, s.carrier, s.container_no, s.current_stage, s.predicted_arrival,
                        s.predicted_confidence, s.prediction_basis,
                        case when s.predicted_arrival is not null then s.predicted_arrival - s.planned_arrival end as days_late,
@@ -78,7 +79,7 @@ public class PurchaseOrderQueryRepository {
         boolean noDaysLate = rs.wasNull();
         return new PurchaseOrderView(
                 rs.getLong("id"), rs.getString("po_number"), rs.getString("supplier"), rs.getString("origin_port"),
-                rs.getString("dest_fc"), rs.getString("status"), rs.getDate("planned_arrival").toLocalDate(),
+                rs.getString("dest_fc"), rs.getString("status"), rs.getString("client_ref"), rs.getDate("planned_arrival").toLocalDate(),
                 noShipment ? null : shipmentId, rs.getString("carrier"), rs.getString("container_no"),
                 rs.getString("current_stage"), predicted == null ? null : predicted.toLocalDate(),
                 rs.getString("predicted_confidence"), rs.getString("prediction_basis"),
