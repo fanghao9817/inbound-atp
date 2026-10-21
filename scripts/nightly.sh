@@ -10,6 +10,7 @@ rc=0
 log "backup";            ./scripts/backup-db.sh nightly
 log "dbt build";         dbt_pg build --quiet          || { log "dbt build FAILED"; rc=1; }
 log "dbt docs";          ./scripts/publish-dbt-docs.sh || rc=1
+log "operator grants";   ./scripts/grant-operators.sh  || rc=1
 log "re-score";          internal_post eta/recalculate-all || rc=1
 log "source freshness";  dbt_pg source freshness       || { log "sources STALE"; rc=1; }
 log "nightly done (rc=$rc)"

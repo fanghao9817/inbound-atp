@@ -21,6 +21,7 @@ cd "$ROOT"
 log "dbt build"
 dbt_pg build --quiet
 ./scripts/publish-dbt-docs.sh
+./scripts/grant-operators.sh                # the schemas were recreated: personal accounts lost their grants
 log "re-score with fresh lane statistics, re-project the storefront"
 internal_post eta/recalculate-all
 internal_post availability/project-all
