@@ -7,6 +7,19 @@ set -euo pipefail
 CONF=~/.config/inbound-atp/databricks.env
 [ -f "$CONF" ] || { log "no $CONF, skipping"; exit 0; }
 set -a; . "$CONF"; set +a
+
+# Free Edition stops serving compute to a workspace nobody has used in the web UI for a few days
+# (denyReason INACTIVE); API and dbt calls don't count as use. Ask before exporting anything, and skip
+# with exit 75 (the unit treats it as success, so the journal tells a skip from a build) instead of
+# failing every week. Starting the warehouse here is what dbt would do first anyway.
+resp=$(curl -sS -m 30 -X POST -H "Authorization: Bearer $DBT_DATABRICKS_TOKEN" \
+  "https://${DBT_DATABRICKS_HOST#https://}/api/2.0/sql/warehouses/${DBT_DATABRICKS_HTTP_PATH##*/}/start" 2>&1 || true)
+if grep -Eq '"denyReason" *: *"INACTIVE"' <<<"$resp"; then
+  log "SKIPPED: the Databricks Free Edition workspace is suspended for inactivity (no web UI login for a few days)."
+  log "Log in to the Databricks web UI, then run: sudo systemctl start inbound-weekly-databricks"
+  exit 75
+fi
+
 cd "$ROOT/data"
 for t in fulfillment_center purchase_order shipment shipment_milestone; do
   docker exec inbound-postgres psql -q -U inbound -d inbound -v ON_ERROR_STOP=1 \

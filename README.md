@@ -164,7 +164,7 @@ Internal (`X-Internal-Token`, box network only): `POST /api/internal/orders`, `â
 | Event-driven workflows, Kafka | Transactional outbox â†’ `shipment.milestones`, `shipment.eta-updated`, `availability.changed`; idempotent consumers; dead-letter topics |
 | Relational + NoSQL data models | PostgreSQL schema in `api/src/main/resources/db/migration`; DynamoDB single-table projection in `infra/aws/template.yaml` |
 | AWS, Lambda, serverless, CloudFormation | `infra/aws/` SAM stack, deployed by GitHub OIDC; Lambda Function URL read path |
-| Python, SQL, dbt, Databricks | `data/` dbt project on PostgreSQL (nightly) and Databricks Free Edition (weekly snapshot); Lambdas in Python |
+| Python, SQL, dbt, Databricks | `data/` dbt project on PostgreSQL (nightly) and Databricks Free Edition (weekly snapshot, when the workspace is active); Lambdas in Python |
 | PostgreSQL | PostgreSQL 16; the fulfillment read path is plain ANSI-style SQL (not tested on MySQL) |
 | CI/CD, automated tests, monitoring | GitHub Actions `ci`, `deploy`, `watchdog`; JUnit + Testcontainers, simulator calibration test, Vitest, dbt tests; Actuator health and Prometheus metrics |
 
@@ -177,6 +177,9 @@ Internal (`X-Internal-Token`, box network only): `POST /api/internal/orders`, `â
   projection and its read path are on AWS. Cost: the box ($44/month) is almost everything; DynamoDB, Lambda and
   CloudFormation stay in the AWS free tier, Databricks runs on the Free Edition.
 - The P80 accuracy tile needs a few weeks of live history after a reset before it has anything to score.
+- Databricks Free Edition stops serving compute to a workspace nobody has used in its web UI for about four
+  days, and API calls don't count as use. The weekly Databricks build then skips with a logged reason until
+  someone logs in, so in practice it runs on demand: log in, then `sudo systemctl start inbound-weekly-databricks`.
 - Monitoring is a GitHub Actions watchdog scheduled hourly, which GitHub runs best-effort (in practice every
   few hours) and disables after 60 days without a commit to the repository.
 - Time zones follow the installed tz database. tzdata 2026c moves Alberta to permanent UTC-6 from November 2026;

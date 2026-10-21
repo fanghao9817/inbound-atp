@@ -14,7 +14,9 @@ ledger reconciles to the positions, reserved stock equals the RESERVED orders.
 
 On the box this runs nightly (`scripts/nightly.sh`, systemd timer): build, test, source freshness,
 docs at `/dbt/`, then the API re-scores open containers with the new statistics. The lane models also
-run on Databricks weekly from a snapshot exported as seeds (`scripts/weekly-databricks.sh`).
+run on Databricks weekly from a snapshot exported as seeds (`scripts/weekly-databricks.sh`), when the Free
+Edition workspace is active: Free Edition stops compute for a workspace nobody has used in its web UI for
+about four days, and the job then skips with a logged reason until someone logs in.
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install dbt-postgres

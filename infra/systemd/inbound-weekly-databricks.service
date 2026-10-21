@@ -7,3 +7,5 @@ Type=oneshot
 User=ubuntu
 ExecStart=/home/ubuntu/inbound-atp/scripts/weekly-databricks.sh
 TimeoutStartSec=45min
+# 75 = skipped because the Free Edition workspace is suspended for inactivity (see the script)
+SuccessExitStatus=75
